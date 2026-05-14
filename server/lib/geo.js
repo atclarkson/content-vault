@@ -30,13 +30,12 @@ async function reverseGeocode(lat, lng) {
   try {
     await waitForRateLimit();
 
-    const url =
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=en`;
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "content-vault/1.0"
-      }
+        "User-Agent": "content-vault/1.0",
+      },
     });
 
     if (!response.ok) {
@@ -50,7 +49,7 @@ async function reverseGeocode(lat, lng) {
       neighborhood: pickFirst(address, ["neighbourhood", "suburb", "quarter"]),
       city: pickFirst(address, ["city", "town", "village", "municipality"]),
       region: address.state || null,
-      country: address.country || null
+      country: address.country || null,
     };
   } catch (error) {
     return null;

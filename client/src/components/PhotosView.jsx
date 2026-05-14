@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPhotos } from "../api";
+import BulkActionBar from "./BulkActionBar";
 import PhotoFilters from "./PhotoFilters";
 import PhotoGrid from "./PhotoGrid";
 import PhotoEditor from "./PhotoEditor";
@@ -11,6 +12,7 @@ export default function PhotosView({ people, tags }) {
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
     let isActive = true;
@@ -26,8 +28,17 @@ export default function PhotosView({ people, tags }) {
           return;
         }
 
-        setPhotos(response?.data || []);
+        const nextPhotos = response?.data || [];
+
+        setPhotos(nextPhotos);
         setSelectedIds(new Set());
+        setEditingPhoto((currentPhoto) => {
+          if (!currentPhoto) {
+            return null;
+          }
+
+          return nextPhotos.find((photo) => photo.id === currentPhoto.id) || null;
+        });
       } catch (loadError) {
         if (!isActive) {
           return;
@@ -46,7 +57,7 @@ export default function PhotosView({ people, tags }) {
     return () => {
       isActive = false;
     };
-  }, [filters]);
+  }, [filters, refreshNonce]);
 
   function handleApplyFilters(nextFilters) {
     setFilters(nextFilters);
@@ -71,6 +82,10 @@ export default function PhotosView({ people, tags }) {
       return nextSelectedIds;
     });
     setEditingPhoto(null);
+  }
+
+  function handleBulkAction() {
+    setRefreshNonce((currentValue) => currentValue + 1);
   }
 
   return (
@@ -111,6 +126,14 @@ export default function PhotosView({ people, tags }) {
           onDeleted={handleDeletedPhoto}
         />
       ) : null}
+
+      <BulkActionBar
+        selectedIds={selectedIds}
+        people={people}
+        allTags={tags}
+        onAction={handleBulkAction}
+        onClear={() => setSelectedIds(new Set())}
+      />
     </div>
   );
 }

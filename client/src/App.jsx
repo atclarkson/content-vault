@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getPeople, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
+import ExportView from "./components/ExportView";
 import PhotosView from "./components/PhotosView";
+import UploadView from "./components/UploadView";
 
 const VIEWS = [
   { id: "photos", label: "Photos" },
@@ -86,20 +88,10 @@ export default function App() {
 
           {currentView === "photos" ? (
             <PhotosView people={people} tags={tags} />
+          ) : currentView === "upload" ? (
+            <UploadView onNavigate={setCurrentView} />
           ) : (
-            <section className="panel flex min-h-[320px] items-center justify-center p-10">
-              <div className="text-center">
-                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Workspace</p>
-                <h2 className="mt-3 text-2xl font-semibold text-stone-900">
-                  {currentView === "upload" ? "Upload" : "Export"}
-                </h2>
-                <p className="mt-4 text-sm text-stone-600">
-                  {currentView === "upload"
-                    ? "UploadView will mount here next."
-                    : "ExportView will mount here next."}
-                </p>
-              </div>
-            </section>
+            <ExportView />
           )}
         </div>
       </main>
