@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
+const exifReader = require("exif-reader");
 const processImage = require("../lib/image");
 const { uploadFile, deleteFile } = require("../lib/r2");
 const hashFile = require("../lib/hash");
@@ -317,52 +318,56 @@ function getUploadErrorStatusCode(error) {
 }
 
 function extractExifFields(metadata) {
-  const exif = metadata.exif || {};
-  const gps = metadata.gps || {};
+  try {
+    if (!Buffer.isBuffer(metadata.exif) || metadata.exif.length === 0) {
+      return allNulls();
+    }
 
+    const parsed = exifReader(metadata.exif);
+
+    return {
+      dateTaken: parsed.Photo?.DateTimeOriginal?.toISOString() || parsed.Image?.DateTime?.toISOString() || null,
+      gpsLat: convertGps(parsed.GPSInfo?.GPSLatitude, parsed.GPSInfo?.GPSLatitudeRef),
+      gpsLng: convertGps(parsed.GPSInfo?.GPSLongitude, parsed.GPSInfo?.GPSLongitudeRef),
+      cameraMake: parsed.Image?.Make || null,
+      cameraModel: parsed.Image?.Model || null,
+      focalLength: parsed.Photo?.FocalLength ? `${parsed.Photo.FocalLength}mm` : null,
+      iso: parsed.Photo?.ISOSpeedRatings || null,
+      shutterSpeed: parsed.Photo?.ExposureTime ? `1/${Math.round(1 / parsed.Photo.ExposureTime)}` : null,
+      aperture: parsed.Photo?.FNumber ? `f/${parsed.Photo.FNumber}` : null
+    };
+  } catch {
+    return allNulls();
+  }
+}
+
+function convertGps(values, ref) {
+  if (!Array.isArray(values) || values.length < 3) {
+    return null;
+  }
+
+  const [degrees, minutes, seconds] = values;
+  let decimal = degrees + (minutes / 60) + (seconds / 3600);
+
+  if (ref === "S" || ref === "W") {
+    decimal *= -1;
+  }
+
+  return Number(decimal.toFixed(8));
+}
+
+function allNulls() {
   return {
-    dateTaken: normalizeExifDate(exif.DateTimeOriginal || exif.DateTime),
-    gpsLat: gps.latitude ?? null,
-    gpsLng: gps.longitude ?? null,
-    cameraMake: exif.Make || null,
-    cameraModel: exif.Model || null,
-    focalLength: formatExifNumber(exif.FocalLength),
-    iso: normalizeIso(exif.ISO),
-    shutterSpeed: formatExifNumber(exif.ExposureTime),
-    aperture: formatExifNumber(exif.FNumber)
+    dateTaken: null,
+    gpsLat: null,
+    gpsLng: null,
+    cameraMake: null,
+    cameraModel: null,
+    focalLength: null,
+    iso: null,
+    shutterSpeed: null,
+    aperture: null
   };
-}
-
-function normalizeExifDate(value) {
-  if (!value || typeof value !== "string") {
-    return null;
-  }
-
-  const match = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const [, year, month, day, hour, minute, second] = match;
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
-}
-
-function normalizeIso(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return null;
-  }
-
-  return Math.round(value);
-}
-
-function formatExifNumber(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return null;
-  }
-
-  const rounded = Number(value.toFixed(6));
-  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
 module.exports = router;

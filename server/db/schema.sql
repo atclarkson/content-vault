@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS photos (
   processing_status TEXT NOT NULL DEFAULT 'queued' CHECK (processing_status IN ('queued', 'processing', 'complete', 'failed', 'needs_review')),
   geo_status TEXT NOT NULL DEFAULT 'skipped' CHECK (geo_status IN ('queued', 'complete', 'skipped', 'failed')),
   processing_error TEXT,
+  geo_error TEXT,
   original_r2_key TEXT,
   thumbnail_r2_key TEXT,
   small_r2_key TEXT,

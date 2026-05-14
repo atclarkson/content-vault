@@ -1,9 +1,152 @@
-export async function getHealth() {
-  const response = await fetch('/api/health');
+async function request(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await parseJson(response);
 
   if (!response.ok) {
-    throw new Error('Failed to fetch health status');
+    throw new Error(data?.error || "Request failed");
   }
 
-  return response.json();
+  return data;
+}
+
+async function parseJson(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error("Invalid JSON response");
+  }
+}
+
+function buildQueryString(filters = {}) {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    params.set(key, String(value));
+  }
+
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : "";
+}
+
+function jsonRequest(path, method, body) {
+  return request(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getPhotos(filters = {}) {
+  return request(`/api/photos${buildQueryString(filters)}`);
+}
+
+export async function getPhoto(id) {
+  return request(`/api/photos/${id}`);
+}
+
+export async function updatePhoto(id, data) {
+  return jsonRequest(`/api/photos/${id}`, "PUT", data);
+}
+
+export async function deletePhoto(id) {
+  return request(`/api/photos/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export async function restorePhoto(id) {
+  return request(`/api/photos/${id}/restore`, {
+    method: "POST"
+  });
+}
+
+export async function bulkUpdate(photoIds, updates) {
+  return jsonRequest("/api/photos/bulk-update", "POST", {
+    photo_ids: photoIds,
+    updates
+  });
+}
+
+export async function getPeople() {
+  return request("/api/people");
+}
+
+export async function createPerson(name) {
+  return jsonRequest("/api/people", "POST", { name });
+}
+
+export async function getTags() {
+  return request("/api/tags");
+}
+
+export async function exportCatalog() {
+  return request("/api/export");
+}
+
+export async function uploadPhotos(files, onProgress) {
+  const formData = new FormData();
+
+  for (const file of Array.from(files || [])) {
+    formData.append("files", file);
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", "/api/upload");
+    xhr.responseType = "text";
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable) {
+        return;
+      }
+
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onProgress(percent);
+    };
+
+    xhr.onload = () => {
+      let data = null;
+
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch (error) {
+        reject(new Error("Invalid JSON response"));
+        return;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) {
+          onProgress(100);
+        }
+
+        resolve(data);
+        return;
+      }
+
+      reject(new Error(data?.error || "Upload failed"));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Upload failed"));
+    };
+
+    xhr.send(formData);
+  });
+}
+
+export async function getProcessingStatus() {
+  return request("/api/processing/status");
 }
