@@ -51,7 +51,7 @@ function flattenUploadResults(responseData, files) {
     if (result.photo) {
       return {
         filename: result.photo.original_filename || file.name,
-        status: "success",
+        status: "done",
         message: "Uploaded"
       };
     }
@@ -72,32 +72,123 @@ function flattenUploadResults(responseData, files) {
   });
 }
 
+function buildFileEntries(nextFiles) {
+  return nextFiles.map((file) => ({
+    file,
+    key: `${file.name}-${file.lastModified}-${file.size}`,
+    filename: file.name,
+    sizeLabel: formatFileSize(file.size),
+    status: "waiting",
+    message: "Queued"
+  }));
+}
+
+function getStatusClasses(status) {
+  if (status === "uploading") {
+    return "bg-amber-50 text-amber-800";
+  }
+
+  if (status === "done") {
+    return "bg-emerald-50 text-emerald-800";
+  }
+
+  if (status === "duplicate") {
+    return "bg-orange-50 text-orange-800";
+  }
+
+  if (status === "error") {
+    return "bg-red-50 text-red-700";
+  }
+
+  return "bg-stone-100 text-stone-600";
+}
+
+function getStatusLabel(status) {
+  if (status === "uploading") {
+    return "Uploading";
+  }
+
+  if (status === "done") {
+    return "Done";
+  }
+
+  if (status === "duplicate") {
+    return "Duplicate";
+  }
+
+  if (status === "error") {
+    return "Error";
+  }
+
+  return "Waiting";
+}
+
 export default function UploadView({ onNavigate }) {
   const inputRef = useRef(null);
-  const [files, setFiles] = useState([]);
+  const [fileEntries, setFileEntries] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [results, setResults] = useState([]);
   const [error, setError] = useState("");
 
   const totalFilesSize = useMemo(
-    () => files.reduce((sum, file) => sum + file.size, 0),
-    [files]
+    () => fileEntries.reduce((sum, entry) => sum + entry.file.size, 0),
+    [fileEntries]
   );
+  const hasCompletedUpload = fileEntries.length > 0 && !isUploading;
 
   function openFilePicker() {
     inputRef.current?.click();
   }
 
-  function handleFilesSelected(nextFiles) {
+  async function startUpload(nextFiles) {
     if (!nextFiles || nextFiles.length === 0) {
       return;
     }
 
-    setFiles((currentFiles) => mergeFiles(currentFiles, nextFiles));
-    setResults([]);
+    if (isUploading) {
+      return;
+    }
+
+    const mergedFiles = mergeFiles([], nextFiles);
+    const nextEntries = buildFileEntries(mergedFiles);
+
+    setFileEntries(nextEntries);
+    setIsUploading(true);
+    setProgress(0);
     setError("");
+
+    try {
+      setFileEntries((currentEntries) => currentEntries.map((entry) => ({
+        ...entry,
+        status: "uploading",
+        message: "Uploading now"
+      })));
+
+      const response = await uploadPhotos(mergedFiles, setProgress);
+      const resultEntries = flattenUploadResults(response?.data, mergedFiles);
+
+      setFileEntries((currentEntries) => currentEntries.map((entry, index) => ({
+        ...entry,
+        status: resultEntries[index]?.status || "error",
+        message: resultEntries[index]?.message || "Unexpected upload result"
+      })));
+    } catch (uploadError) {
+      setError(uploadError.message || "Upload failed");
+      setFileEntries((currentEntries) =>
+        currentEntries.map((entry) => ({
+          ...entry,
+          status: "error",
+          message: uploadError.message || "Upload failed"
+        }))
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function handleFilesSelected(nextFiles) {
+    startUpload(nextFiles);
   }
 
   function handleFileInputChange(event) {
@@ -111,49 +202,8 @@ export default function UploadView({ onNavigate }) {
     handleFilesSelected(event.dataTransfer.files);
   }
 
-  function removeFile(fileToRemove) {
-    setFiles((currentFiles) =>
-      currentFiles.filter(
-        (file) =>
-          !(
-            file.name === fileToRemove.name
-            && file.size === fileToRemove.size
-            && file.lastModified === fileToRemove.lastModified
-          )
-      )
-    );
-  }
-
-  async function handleUpload() {
-    if (files.length === 0 || isUploading) {
-      return;
-    }
-
-    setIsUploading(true);
-    setProgress(0);
-    setResults([]);
-    setError("");
-
-    try {
-      const response = await uploadPhotos(files, setProgress);
-      setResults(flattenUploadResults(response?.data, files));
-    } catch (uploadError) {
-      setError(uploadError.message || "Upload failed");
-      setResults(
-        files.map((file) => ({
-          filename: file.name,
-          status: "error",
-          message: uploadError.message || "Upload failed"
-        }))
-      );
-    } finally {
-      setIsUploading(false);
-    }
-  }
-
   function resetUploadState() {
-    setFiles([]);
-    setResults([]);
+    setFileEntries([]);
     setError("");
     setProgress(0);
     setIsDragging(false);
@@ -163,13 +213,13 @@ export default function UploadView({ onNavigate }) {
     <section className="panel p-6">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Upload</p>
-          <h2 className="mt-2 text-2xl font-semibold text-stone-900">Import photos</h2>
-        </div>
+            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Upload</p>
+            <h2 className="mt-2 text-2xl font-semibold text-stone-900">Import photos</h2>
+          </div>
 
-        {files.length > 0 ? (
+        {fileEntries.length > 0 ? (
           <p className="text-sm text-stone-500">
-            {files.length} file{files.length === 1 ? "" : "s"} selected, {formatFileSize(totalFilesSize)}
+            {fileEntries.length} file{fileEntries.length === 1 ? "" : "s"} selected, {formatFileSize(totalFilesSize)}
           </p>
         ) : null}
       </div>
@@ -210,36 +260,36 @@ export default function UploadView({ onNavigate }) {
       >
         <p className="text-lg font-semibold text-stone-900">Drag photos here</p>
         <p className="mt-3 text-sm text-stone-600">or click to choose JPG, PNG, HEIC, HEIF, or WebP files</p>
+        <p className="mt-2 text-xs uppercase tracking-[0.24em] text-stone-500">Upload starts automatically</p>
       </button>
 
-      {files.length > 0 ? (
+      {fileEntries.length > 0 ? (
         <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
           <div className="mb-4 flex items-center justify-between gap-4">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Selected files</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Batch status</p>
             <button type="button" onClick={resetUploadState} className="text-sm text-stone-500 hover:text-stone-900">
-              Clear all
+              Upload More
             </button>
           </div>
 
           <div className="space-y-3">
-            {files.map((file) => (
+            {fileEntries.map((entry) => (
               <div
-                key={`${file.name}-${file.lastModified}-${file.size}`}
+                key={entry.key}
                 className="flex items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white px-4 py-3"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-stone-800">{file.name}</p>
-                  <p className="mt-1 text-xs text-stone-500">{formatFileSize(file.size)}</p>
+                  <p className="truncate text-sm font-medium text-stone-800">{entry.filename}</p>
+                  <p className="mt-1 text-xs text-stone-500">{entry.sizeLabel}</p>
+                  {entry.message ? <p className="mt-1 text-xs text-stone-500">{entry.message}</p> : null}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => removeFile(file)}
-                  className="text-sm text-stone-500 transition hover:text-red-700"
-                  disabled={isUploading}
-                >
-                  Remove
-                </button>
+                <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${getStatusClasses(entry.status)}`}>
+                  <span className={entry.status === "uploading" ? "inline-block h-2 w-2 rounded-full bg-current animate-pulse" : ""}>
+                    {entry.status === "done" ? "✓" : ""}
+                  </span>
+                  <span>{getStatusLabel(entry.status)}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -260,42 +310,12 @@ export default function UploadView({ onNavigate }) {
 
       {error ? <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-      {results.length > 0 ? (
-        <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-white p-4">
-          <p className="mb-4 text-xs uppercase tracking-[0.24em] text-stone-500">Results</p>
-          <div className="space-y-3">
-            {results.map((result) => (
-              <div
-                key={`${result.filename}-${result.status}`}
-                className={`rounded-2xl px-4 py-3 text-sm ${
-                  result.status === "success"
-                    ? "bg-emerald-50 text-emerald-800"
-                    : result.status === "duplicate"
-                      ? "bg-amber-50 text-amber-800"
-                      : "bg-red-50 text-red-700"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <span className="font-medium">{result.filename}</span>
-                  <span className="uppercase tracking-[0.2em]">{result.status}</span>
-                </div>
-                <p className="mt-1">{result.message}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       <div className="mt-6 flex flex-wrap gap-3">
-        <button type="button" onClick={handleUpload} disabled={files.length === 0 || isUploading} className="btn-primary">
-          {isUploading ? "Uploading..." : "Upload"}
-        </button>
-
         <button type="button" onClick={resetUploadState} className="btn-secondary" disabled={isUploading}>
           Upload More
         </button>
 
-        <button type="button" onClick={() => onNavigate("photos")} className="btn-secondary">
+        <button type="button" onClick={() => onNavigate("photos")} className="btn-secondary" disabled={!hasCompletedUpload}>
           View Photos
         </button>
       </div>
