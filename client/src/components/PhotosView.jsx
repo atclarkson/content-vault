@@ -68,10 +68,10 @@ export default function PhotosView({ people, tags }) {
   }
 
   function handleSavedPhoto(updatedPhoto) {
-    setPhotos((currentPhotos) => currentPhotos.map((photo) => (
-      photo.id === updatedPhoto.id ? updatedPhoto : photo
+    setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
+      currentPhoto.id === updatedPhoto.id ? updatedPhoto : currentPhoto
     )));
-    setEditingPhoto(null);
+    setEditingPhoto(updatedPhoto);
   }
 
   function handleDeletedPhoto(photoId) {

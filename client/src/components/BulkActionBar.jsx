@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { bulkUpdate } from "../api";
+import { useEffect, useState } from "react";
+import { bulkUpdate, createPerson, getPeople } from "../api";
 
 function ActionMenu({ title, children }) {
   return (
@@ -12,9 +12,11 @@ function ActionMenu({ title, children }) {
 
 export default function BulkActionBar({ selectedIds, people, allTags, onAction, onClear }) {
   const [activeAction, setActiveAction] = useState("");
+  const [availablePeople, setAvailablePeople] = useState(people);
   const [tagName, setTagName] = useState("");
   const [selectedTagNames, setSelectedTagNames] = useState([]);
   const [selectedPeopleIds, setSelectedPeopleIds] = useState([]);
+  const [newPersonName, setNewPersonName] = useState("");
   const [location, setLocation] = useState({
     neighborhood: "",
     city: "",
@@ -23,6 +25,38 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setAvailablePeople(people);
+  }, [people]);
+
+  useEffect(() => {
+    if (activeAction !== "add-person" && activeAction !== "remove-person") {
+      return;
+    }
+
+    let isActive = true;
+
+    async function loadPeople() {
+      try {
+        const response = await getPeople();
+
+        if (!isActive) {
+          return;
+        }
+
+        setAvailablePeople(response?.data || []);
+      } catch {
+        // Keep the current people snapshot if refresh fails.
+      }
+    }
+
+    loadPeople();
+
+    return () => {
+      isActive = false;
+    };
+  }, [activeAction]);
 
   if (selectedIds.size === 0) {
     return null;
@@ -41,6 +75,7 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
       setTagName("");
       setSelectedTagNames([]);
       setSelectedPeopleIds([]);
+      setNewPersonName("");
       setLocation({ neighborhood: "", city: "", region: "", country: "" });
     } catch (actionError) {
       setError(actionError.message || "Bulk update failed");
@@ -85,6 +120,40 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
     }
 
     return updates;
+  }
+
+  async function handleCreatePerson() {
+    const trimmedName = newPersonName.trim();
+
+    if (!trimmedName || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const response = await createPerson(trimmedName);
+      const person = response?.data;
+
+      if (!person) {
+        throw new Error("Failed to create person");
+      }
+
+      setAvailablePeople((currentPeople) => {
+        const nextPeople = [...currentPeople, person];
+        nextPeople.sort((left, right) => left.name.localeCompare(right.name));
+        return nextPeople;
+      });
+      setSelectedPeopleIds((currentIds) => (
+        currentIds.includes(person.id) ? currentIds : [...currentIds, person.id]
+      ));
+      setNewPersonName("");
+    } catch (actionError) {
+      setError(actionError.message || "Failed to create person");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -175,7 +244,7 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
           <div className="mt-4">
             <ActionMenu title="Add Person">
               <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-3">
-                {people.map((person) => (
+                {availablePeople.map((person) => (
                   <label key={person.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
                     <input
                       type="checkbox"
@@ -197,6 +266,29 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
                   {isSubmitting ? "Applying..." : "Apply"}
                 </button>
               </div>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <input
+                  type="text"
+                  value={newPersonName}
+                  onChange={(event) => setNewPersonName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleCreatePerson();
+                    }
+                  }}
+                  className="field min-w-[240px] flex-1"
+                  placeholder="Add person..."
+                />
+                <button
+                  type="button"
+                  onClick={handleCreatePerson}
+                  disabled={isSubmitting || !newPersonName.trim()}
+                  className="btn-secondary"
+                >
+                  Add New Person
+                </button>
+              </div>
             </ActionMenu>
           </div>
         ) : null}
@@ -205,7 +297,7 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
           <div className="mt-4">
             <ActionMenu title="Remove Person">
               <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-3">
-                {people.map((person) => (
+                {availablePeople.map((person) => (
                   <label key={person.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
                     <input
                       type="checkbox"

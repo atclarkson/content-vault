@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { deletePhoto, updatePhoto } from "../api";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
@@ -22,6 +22,32 @@ function hasExifData(photo) {
   );
 }
 
+function buildPayload({
+  title,
+  description,
+  altText,
+  capturedAt,
+  selectedPeopleIds,
+  tagNames,
+  neighborhood,
+  city,
+  region,
+  country
+}) {
+  return {
+    title,
+    description,
+    alt_text: altText,
+    captured_at: capturedAt || null,
+    people: selectedPeopleIds,
+    tags: tagNames,
+    neighborhood,
+    city,
+    region,
+    country
+  };
+}
+
 export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onDeleted }) {
   const [title, setTitle] = useState(photo.title || "");
   const [description, setDescription] = useState(photo.description || "");
@@ -36,7 +62,9 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
   const [country, setCountry] = useState(photo.country || "");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [saveState, setSaveState] = useState("idle");
   const [error, setError] = useState("");
+  const lastSavedPayloadRef = useRef("");
 
   useEffect(() => {
     setTitle(photo.title || "");
@@ -49,6 +77,19 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
     setCity(photo.city || "");
     setRegion(photo.region || "");
     setCountry(photo.country || "");
+    lastSavedPayloadRef.current = JSON.stringify(buildPayload({
+      title: photo.title || "",
+      description: photo.description || "",
+      altText: photo.alt_text || "",
+      capturedAt: formatDateForInput(photo.captured_at),
+      selectedPeopleIds: (photo.people || []).map((person) => person.id),
+      tagNames: photo.tags || [],
+      neighborhood: photo.neighborhood || "",
+      city: photo.city || "",
+      region: photo.region || "",
+      country: photo.country || ""
+    }));
+    setSaveState("idle");
     setError("");
   }, [photo]);
 
@@ -57,32 +98,49 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
   }, [people]);
 
   const showExifSection = useMemo(() => hasExifData(photo), [photo]);
+  const currentPayload = useMemo(() => buildPayload({
+    title,
+    description,
+    altText,
+    capturedAt,
+    selectedPeopleIds,
+    tagNames,
+    neighborhood,
+    city,
+    region,
+    country
+  }), [title, description, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
+  const serializedPayload = useMemo(() => JSON.stringify(currentPayload), [currentPayload]);
 
-  async function handleSave() {
-    setIsSaving(true);
-    setError("");
-
-    try {
-      const response = await updatePhoto(photo.id, {
-        title,
-        description,
-        alt_text: altText,
-        captured_at: capturedAt || null,
-        people: selectedPeopleIds,
-        tags: tagNames,
-        neighborhood,
-        city,
-        region,
-        country
-      });
-
-      onSaved(response.data);
-    } catch (saveError) {
-      setError(saveError.message || "Failed to save photo");
-    } finally {
-      setIsSaving(false);
+  useEffect(() => {
+    if (serializedPayload === lastSavedPayloadRef.current) {
+      return;
     }
-  }
+
+    setSaveState("dirty");
+
+    const timeoutId = window.setTimeout(async () => {
+      setIsSaving(true);
+      setSaveState("saving");
+      setError("");
+
+      try {
+        const response = await updatePhoto(photo.id, currentPayload);
+        lastSavedPayloadRef.current = serializedPayload;
+        setSaveState("saved");
+        onSaved(response.data);
+      } catch (saveError) {
+        setError(saveError.message || "Failed to save photo");
+        setSaveState("error");
+      } finally {
+        setIsSaving(false);
+      }
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [photo.id, currentPayload, onSaved, serializedPayload]);
 
   async function handleDelete() {
     if (!window.confirm("Are you sure?")) {
@@ -112,6 +170,13 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photo Editor</p>
           <h2 className="mt-2 text-lg font-semibold text-stone-900">{photo.original_filename}</h2>
+          <p className="mt-2 text-sm text-stone-500">
+            {saveState === "saving" && "Saving changes..."}
+            {saveState === "saved" && "Changes saved"}
+            {saveState === "dirty" && "Waiting to save..."}
+            {saveState === "error" && "Save failed"}
+            {saveState === "idle" && "Ready"}
+          </p>
         </div>
 
         <button type="button" onClick={onClose} className="btn-secondary px-3 py-2" aria-label="Close editor">
@@ -230,9 +295,9 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
 
       <div className="border-t border-stone-200 px-6 py-4">
         <div className="flex gap-3">
-          <button type="button" onClick={handleSave} disabled={isSaving || isDeleting} className="btn-primary flex-1">
-            {isSaving ? "Saving..." : "Save"}
-          </button>
+          <div className="flex flex-1 items-center rounded-2xl bg-stone-100 px-4 py-2.5 text-sm text-stone-600">
+            Autosave is on
+          </div>
           <button
             type="button"
             onClick={handleDelete}
