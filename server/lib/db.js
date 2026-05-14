@@ -26,9 +26,50 @@ function initializeDatabase() {
   const schemaSql = fs.readFileSync(schemaPath, 'utf8');
 
   database.exec(schemaSql);
+  ensurePhotoColumns(database);
   seedPeople(database);
 
   return database;
+}
+
+function ensurePhotoColumns(database) {
+  const columns = database.prepare("PRAGMA table_info(photos)").all();
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  const missingColumns = [
+    {
+      name: "geo_status",
+      sql: "ALTER TABLE photos ADD COLUMN geo_status TEXT NOT NULL DEFAULT 'skipped' CHECK (geo_status IN ('queued', 'complete', 'skipped', 'failed'))"
+    },
+    {
+      name: "original_url",
+      sql: "ALTER TABLE photos ADD COLUMN original_url TEXT"
+    },
+    {
+      name: "thumbnail_url",
+      sql: "ALTER TABLE photos ADD COLUMN thumbnail_url TEXT"
+    },
+    {
+      name: "neighborhood",
+      sql: "ALTER TABLE photos ADD COLUMN neighborhood TEXT"
+    },
+    {
+      name: "small_url",
+      sql: "ALTER TABLE photos ADD COLUMN small_url TEXT"
+    },
+    {
+      name: "large_url",
+      sql: "ALTER TABLE photos ADD COLUMN large_url TEXT"
+    }
+  ];
+
+  for (const column of missingColumns) {
+    if (!columnNames.has(column.name)) {
+      database.exec(column.sql);
+    }
+  }
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photos_geo_status ON photos (geo_status)");
 }
 
 function seedPeople(database) {
