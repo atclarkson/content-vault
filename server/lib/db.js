@@ -38,6 +38,18 @@ function ensurePhotoColumns(database) {
 
   const missingColumns = [
     {
+      name: "title",
+      sql: "ALTER TABLE photos ADD COLUMN title TEXT"
+    },
+    {
+      name: "description",
+      sql: "ALTER TABLE photos ADD COLUMN description TEXT"
+    },
+    {
+      name: "alt_text",
+      sql: "ALTER TABLE photos ADD COLUMN alt_text TEXT"
+    },
+    {
       name: "geo_status",
       sql: "ALTER TABLE photos ADD COLUMN geo_status TEXT NOT NULL DEFAULT 'skipped' CHECK (geo_status IN ('queued', 'complete', 'skipped', 'failed'))"
     },
