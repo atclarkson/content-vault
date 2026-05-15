@@ -12,9 +12,16 @@ router.get("/", (req, res) => {
       WHERE photos.deleted_at IS NULL
       ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC
     `).all();
+    const videos = db.prepare(`
+      SELECT videos.*
+      FROM videos
+      WHERE videos.deleted_at IS NULL
+      ORDER BY videos.date_published DESC, videos.id DESC
+    `).all();
 
     const exportedPhotos = mapExportPhotos(db, photos);
-    return res.json({ data: exportedPhotos });
+    const exportedVideos = mapExportVideos(db, videos);
+    return res.json({ data: { photos: exportedPhotos, videos: exportedVideos } });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -96,6 +103,78 @@ function mapExportPhotos(db, photos) {
       aperture: photo.aperture
     },
     uploaded_at: photo.uploaded_at
+  }));
+}
+
+function mapExportVideos(db, videos) {
+  if (videos.length === 0) {
+    return [];
+  }
+
+  const videoIds = videos.map((video) => video.id);
+  const placeholders = createPlaceholders(videoIds.length);
+  const peopleRows = db.prepare(`
+    SELECT video_people.video_id, people.name
+    FROM video_people
+    INNER JOIN people ON people.id = video_people.person_id
+    WHERE video_people.video_id IN (${placeholders})
+    ORDER BY people.name
+  `).all(...videoIds);
+  const tagRows = db.prepare(`
+    SELECT video_tags.video_id, tags.name
+    FROM video_tags
+    INNER JOIN tags ON tags.id = video_tags.tag_id
+    WHERE video_tags.video_id IN (${placeholders})
+    ORDER BY tags.name
+  `).all(...videoIds);
+
+  const peopleMap = new Map();
+  const tagsMap = new Map();
+
+  for (const row of peopleRows) {
+    if (!peopleMap.has(row.video_id)) {
+      peopleMap.set(row.video_id, []);
+    }
+
+    peopleMap.get(row.video_id).push(row.name);
+  }
+
+  for (const row of tagRows) {
+    if (!tagsMap.has(row.video_id)) {
+      tagsMap.set(row.video_id, []);
+    }
+
+    tagsMap.get(row.video_id).push(row.name);
+  }
+
+  return videos.map((video) => ({
+    id: video.id,
+    youtube_id: video.youtube_id,
+    youtube_url: video.youtube_url,
+    title: video.title,
+    description: video.description,
+    thumbnail_url: video.thumbnail_url,
+    video_type: video.video_type,
+    video_category: video.video_category,
+    duration_seconds: video.duration_seconds,
+    date_published: video.date_published,
+    date_filmed: video.date_filmed,
+    date_filmed_end: video.date_filmed_end,
+    date_filmed_source: video.date_filmed_source,
+    filmed_city: video.filmed_city,
+    filmed_country: video.filmed_country,
+    filmed_location_source: video.filmed_location_source,
+    people: peopleMap.get(video.id) || [],
+    tags: tagsMap.get(video.id) || [],
+    stats: {
+      view_count: video.view_count,
+      like_count: video.like_count,
+      comment_count: video.comment_count,
+      refreshed_at: video.stats_refreshed_at
+    },
+    ai_caption: video.ai_caption || null,
+    alt_text: video.alt_text || null,
+    notes_for_ai: video.notes_for_ai || null
   }));
 }
 

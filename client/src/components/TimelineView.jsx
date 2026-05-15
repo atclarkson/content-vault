@@ -21,15 +21,6 @@ function formatMonthRange(dateStart, dateEnd) {
   return `${formatter.format(new Date(dateStart))} – ${formatter.format(new Date(dateEnd))}`;
 }
 
-function formatCompactCount(value, noun) {
-  const formattedValue = new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1
-  }).format(Number(value || 0));
-
-  return `${formattedValue} ${noun}`;
-}
-
 function formatVideoDuration(totalSeconds) {
   const seconds = Number(totalSeconds || 0);
 
@@ -808,13 +799,6 @@ function VideoGrid({ videos, onVideoClick }) {
             </div>
 
             <div className="space-y-2 px-3 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
-                  {video.video_type === "short" ? "Short" : "Longform"}
-                </span>
-                <span className="text-xs text-stone-500">{formatCompactCount(video.view_count, "views")}</span>
-              </div>
-
               <h3 className="line-clamp-2 text-sm font-medium leading-5 text-stone-900">
                 {video.title || "Untitled video"}
               </h3>

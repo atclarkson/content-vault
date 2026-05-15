@@ -303,6 +303,7 @@ export default function ExportView() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Photos" value={isLoadingStats ? "..." : stats.totalPhotos} />
+        <StatCard label="Total Videos" value={isLoadingVideoStats ? "..." : videoStats.totalVideos} />
         <StatCard label="Missing Alt Text" value={isLoadingStats ? "..." : stats.missingAltText} />
         <StatCard label="Missing People" value={isLoadingStats ? "..." : stats.missingPeople} />
         <StatCard label="Missing Tags" value={isLoadingStats ? "..." : stats.missingTags} />
