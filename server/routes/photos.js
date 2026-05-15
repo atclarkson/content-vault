@@ -524,7 +524,17 @@ function pickLocationUpdates(payload) {
 
   for (const field of locationFields) {
     if (Object.prototype.hasOwnProperty.call(payload, field)) {
-      updates[field] = payload[field] || null;
+      const value = payload[field];
+
+      if (typeof value === "string") {
+        const trimmedValue = value.trim();
+
+        if (trimmedValue !== "") {
+          updates[field] = trimmedValue;
+        }
+      } else if (value !== undefined && value !== null) {
+        updates[field] = value;
+      }
     }
   }
 

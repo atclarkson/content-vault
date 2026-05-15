@@ -1,7 +1,7 @@
 const NAV_ITEMS = [
-  { id: "photos", label: "Photos" },
+  { id: "photos", label: "Timeline" },
   { id: "upload", label: "Upload" },
-  { id: "export", label: "Export" }
+  { id: "export", label: "Import / Export" }
 ];
 
 export default function Sidebar({ currentView, onNavigate }) {

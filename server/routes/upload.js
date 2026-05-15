@@ -72,10 +72,19 @@ const upload = multer({
   },
 });
 
-const findPhotoByHash = db.prepare(`
+const findActivePhotoByHash = db.prepare(`
   SELECT *
   FROM photos
   WHERE sha256_hash = ?
+    AND deleted_at IS NULL
+  LIMIT 1
+`);
+
+const findDeletedPhotoByHash = db.prepare(`
+  SELECT *
+  FROM photos
+  WHERE sha256_hash = ?
+    AND deleted_at IS NOT NULL
   LIMIT 1
 `);
 
@@ -116,6 +125,66 @@ const insertPhoto = db.prepare(`
 const selectPhotoById = db.prepare(`
   SELECT *
   FROM photos
+  WHERE id = ?
+`);
+
+const clearPhotoPeople = db.prepare(`
+  DELETE FROM photo_people
+  WHERE photo_id = ?
+`);
+
+const clearPhotoTags = db.prepare(`
+  DELETE FROM photo_tags
+  WHERE photo_id = ?
+`);
+
+const restoreDeletedPhoto = db.prepare(`
+  UPDATE photos
+  SET uuid = ?,
+      original_filename = ?,
+      original_extension = ?,
+      mime_type = ?,
+      file_size_bytes = ?,
+      sha256_hash = ?,
+      width = ?,
+      height = ?,
+      title = ?,
+      description = NULL,
+      alt_text = NULL,
+      ai_caption = NULL,
+      captured_at = ?,
+      date_source = ?,
+      date_manually_edited = 0,
+      location_name = NULL,
+      location_label = NULL,
+      neighborhood = NULL,
+      city = NULL,
+      region = NULL,
+      country = NULL,
+      latitude = ?,
+      longitude = ?,
+      location_manually_edited = 0,
+      camera_make = ?,
+      camera_model = ?,
+      focal_length = ?,
+      iso = ?,
+      shutter_speed = ?,
+      aperture = ?,
+      processing_status = ?,
+      geo_status = ?,
+      processing_error = NULL,
+      geo_error = NULL,
+      original_r2_key = ?,
+      thumbnail_r2_key = ?,
+      small_r2_key = ?,
+      large_r2_key = ?,
+      original_url = ?,
+      thumbnail_url = ?,
+      small_url = ?,
+      large_url = ?,
+      uploaded_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP,
+      deleted_at = NULL
   WHERE id = ?
 `);
 
@@ -179,7 +248,8 @@ async function processUpload(file) {
     "application/octet-stream";
   const fileHash = hashFile(file.buffer);
   const derivedTitle = buildTitleFromFilename(file.originalname);
-  const existingPhoto = findPhotoByHash.get(fileHash);
+  const existingPhoto = findActivePhotoByHash.get(fileHash);
+  const deletedPhoto = existingPhoto ? null : findDeletedPhotoByHash.get(fileHash);
 
   if (existingPhoto) {
     return {
@@ -228,39 +298,90 @@ async function processUpload(file) {
     const processingStatus = hasGps ? "processing" : "complete";
     const geoStatus = hasGps ? "queued" : "skipped";
 
-    const insertResult = insertPhoto.run(
-      uuid,
-      file.originalname,
-      originalExtension,
-      originalMimeType,
-      file.size,
-      fileHash,
-      processedImage.exif.width || null,
-      processedImage.exif.height || null,
-      derivedTitle,
-      extractedExif.dateTaken,
-      extractedExif.dateTaken ? "exif" : "uploaded_at",
-      extractedExif.gpsLat,
-      extractedExif.gpsLng,
-      extractedExif.cameraMake,
-      extractedExif.cameraModel,
-      extractedExif.focalLength,
-      extractedExif.iso,
-      extractedExif.shutterSpeed,
-      extractedExif.aperture,
-      processingStatus,
-      geoStatus,
-      keys.original,
-      keys.thumbnail,
-      keys.small,
-      keys.large,
-      originalUrl,
-      thumbnailUrl,
-      smallUrl,
-      largeUrl,
-    );
+    let photoId;
 
-    const photo = selectPhotoById.get(insertResult.lastInsertRowid);
+    if (deletedPhoto) {
+      restoreDeletedPhoto.run(
+        uuid,
+        file.originalname,
+        originalExtension,
+        originalMimeType,
+        file.size,
+        fileHash,
+        processedImage.exif.width || null,
+        processedImage.exif.height || null,
+        derivedTitle,
+        extractedExif.dateTaken,
+        extractedExif.dateTaken ? "exif" : "uploaded_at",
+        extractedExif.gpsLat,
+        extractedExif.gpsLng,
+        extractedExif.cameraMake,
+        extractedExif.cameraModel,
+        extractedExif.focalLength,
+        extractedExif.iso,
+        extractedExif.shutterSpeed,
+        extractedExif.aperture,
+        processingStatus,
+        geoStatus,
+        keys.original,
+        keys.thumbnail,
+        keys.small,
+        keys.large,
+        originalUrl,
+        thumbnailUrl,
+        smallUrl,
+        largeUrl,
+        deletedPhoto.id,
+      );
+
+      clearPhotoPeople.run(deletedPhoto.id);
+      clearPhotoTags.run(deletedPhoto.id);
+      photoId = deletedPhoto.id;
+      await cleanupUploadedFiles(
+        [
+          deletedPhoto.original_r2_key,
+          deletedPhoto.thumbnail_r2_key,
+          deletedPhoto.small_r2_key,
+          deletedPhoto.large_r2_key,
+        ].filter(Boolean),
+      );
+    } else {
+      const insertResult = insertPhoto.run(
+        uuid,
+        file.originalname,
+        originalExtension,
+        originalMimeType,
+        file.size,
+        fileHash,
+        processedImage.exif.width || null,
+        processedImage.exif.height || null,
+        derivedTitle,
+        extractedExif.dateTaken,
+        extractedExif.dateTaken ? "exif" : "uploaded_at",
+        extractedExif.gpsLat,
+        extractedExif.gpsLng,
+        extractedExif.cameraMake,
+        extractedExif.cameraModel,
+        extractedExif.focalLength,
+        extractedExif.iso,
+        extractedExif.shutterSpeed,
+        extractedExif.aperture,
+        processingStatus,
+        geoStatus,
+        keys.original,
+        keys.thumbnail,
+        keys.small,
+        keys.large,
+        originalUrl,
+        thumbnailUrl,
+        smallUrl,
+        largeUrl,
+      );
+
+      photoId = insertResult.lastInsertRowid;
+    }
+
+    const photo = selectPhotoById.get(photoId);
 
     if (hasGps) {
       queueReverseGeocode(photo.id, extractedExif.gpsLat, extractedExif.gpsLng);

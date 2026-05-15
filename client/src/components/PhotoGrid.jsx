@@ -30,7 +30,16 @@ function toggleSelection(selectedIds, photoId, shouldSelect) {
   return nextSelectedIds;
 }
 
-export default function PhotoGrid({ photos, sort, onSortChange, onPhotoClick, selectedIds, onSelectionChange }) {
+export default function PhotoGrid({
+  photos,
+  sort,
+  onSortChange,
+  onPhotoClick,
+  selectedIds,
+  onSelectionChange,
+  embedded = false,
+  showSortControl = true
+}) {
   const photoCount = photos.length;
   const lastToggledIdRef = useRef(null);
   const dragSelectionRef = useRef({
@@ -143,7 +152,7 @@ export default function PhotoGrid({ photos, sort, onSortChange, onPhotoClick, se
 
   if (photoCount === 0) {
     return (
-      <section className="panel h-full overflow-hidden p-8">
+      <section className={embedded ? "" : "panel h-full overflow-hidden p-8"}>
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photos</p>
@@ -162,30 +171,34 @@ export default function PhotoGrid({ photos, sort, onSortChange, onPhotoClick, se
   }
 
   return (
-    <section className="panel flex h-full min-h-0 flex-col overflow-hidden p-6">
-      <div className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photos</p>
-          <h2 className="mt-2 text-2xl font-semibold text-stone-900">
-            {photoCount} photo{photoCount === 1 ? "" : "s"}
-          </h2>
-        </div>
+    <section className={embedded ? "" : "panel flex h-full min-h-0 flex-col overflow-hidden p-6"}>
+      {!embedded ? (
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photos</p>
+            <h2 className="mt-2 text-2xl font-semibold text-stone-900">
+              {photoCount} photo{photoCount === 1 ? "" : "s"}
+            </h2>
+          </div>
 
-        <div className="flex items-end gap-4">
-          <label className="block min-w-[220px] text-right">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Sort</span>
-            <select value={sort} onChange={(event) => onSortChange(event.target.value)} className="field">
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {showSortControl ? (
+            <div className="flex items-end gap-4">
+              <label className="block min-w-[220px] text-right">
+                <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Sort</span>
+                <select value={sort} onChange={(event) => onSortChange(event.target.value)} className="field">
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
         </div>
-      </div>
+      ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className={embedded ? "" : "min-h-0 flex-1 overflow-y-auto"}>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {photos.map((photo) => {
             const isSelected = selectedIds.has(photo.id);

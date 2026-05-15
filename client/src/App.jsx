@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import { getPeople, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
-import PhotosView from "./components/PhotosView";
+import TimelineView from "./components/TimelineView";
 import UploadView from "./components/UploadView";
+
+const VIEW_LABELS = {
+  photos: "Timeline",
+  upload: "Upload",
+  export: "Import / Export"
+};
 
 export default function App() {
   const [currentView, setCurrentView] = useState("photos");
@@ -54,8 +60,16 @@ export default function App() {
             </div>
           ) : null}
 
+          {currentView === "export" ? (
+            <div className="mb-4">
+              <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
+                {VIEW_LABELS[currentView]}
+              </p>
+            </div>
+          ) : null}
+
           {currentView === "photos" ? (
-            <PhotosView people={people} tags={tags} />
+            <TimelineView people={people} tags={tags} />
           ) : currentView === "upload" ? (
             <UploadView onNavigate={setCurrentView} />
           ) : (

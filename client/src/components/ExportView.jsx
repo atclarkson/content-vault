@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { exportCatalog, getPhotos } from "../api";
+import { exportCatalog, getPhotos, importDestinations } from "../api";
 
 function getMissingCount(photos, field) {
   if (field === "alt_text") {
@@ -42,6 +42,10 @@ export default function ExportView() {
     missingPeople: 0,
     missingTags: 0
   });
+  const [destinationFile, setDestinationFile] = useState(null);
+  const [isImportingDestinations, setIsImportingDestinations] = useState(false);
+  const [destinationImportMessage, setDestinationImportMessage] = useState("");
+  const [destinationImportError, setDestinationImportError] = useState("");
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState("");
@@ -101,6 +105,30 @@ export default function ExportView() {
     }
   }
 
+  async function handleImportDestinations() {
+    if (!destinationFile) {
+      return;
+    }
+
+    setIsImportingDestinations(true);
+    setDestinationImportMessage("");
+    setDestinationImportError("");
+
+    try {
+      const response = await importDestinations(destinationFile);
+      const summary = response?.data;
+
+      setDestinationImportMessage(
+        `${summary?.added || 0} destinations added, ${summary?.skipped || 0} already existed, ${summary?.filtered || 0} pre-2022 entries skipped`
+      );
+      setDestinationFile(null);
+    } catch (importError) {
+      setDestinationImportError(importError.message || "Failed to import destinations");
+    } finally {
+      setIsImportingDestinations(false);
+    }
+  }
+
   return (
     <section className="panel p-6">
       <div className="mb-6">
@@ -109,6 +137,65 @@ export default function ExportView() {
       </div>
 
       {error ? <div className="mb-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+
+      <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Import Destinations</p>
+            <p className="mt-3 text-sm text-stone-600">
+              Re-importing is safe. Existing destination rows are skipped automatically.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block min-w-[320px] flex-1">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">CSV File</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => {
+                const nextFile = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                setDestinationFile(nextFile);
+                setDestinationImportMessage("");
+                setDestinationImportError("");
+              }}
+              className="field"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={handleImportDestinations}
+            disabled={!destinationFile || isImportingDestinations}
+            className="btn-primary"
+          >
+            {isImportingDestinations ? "Importing..." : "Import Destinations"}
+          </button>
+        </div>
+
+        {destinationFile ? (
+          <p className="mt-3 text-sm text-stone-600">
+            Selected: {destinationFile.name}
+          </p>
+        ) : null}
+
+        {isImportingDestinations ? (
+          <p className="mt-3 text-sm text-stone-600">Uploading and processing destination CSV...</p>
+        ) : null}
+
+        {destinationImportMessage ? (
+          <div className="mt-4 bg-green-50 px-4 py-3 text-sm text-green-700">
+            {destinationImportMessage}
+          </div>
+        ) : null}
+
+        {destinationImportError ? (
+          <div className="mt-4 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {destinationImportError}
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Photos" value={isLoadingStats ? "..." : stats.totalPhotos} />

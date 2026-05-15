@@ -60,6 +60,7 @@ router.post("/import", upload.single("file"), (req, res) => {
 
     let added = 0;
     let skipped = 0;
+    let filtered = 0;
     let total = 0;
 
     const importRows = getDb().transaction((dataRows) => {
@@ -73,7 +74,7 @@ router.post("/import", upload.single("file"), (req, res) => {
         const parsedRow = parseDestinationRow(row);
 
         if (!parsedRow || parsedRow.dateStart < "2022-01-01") {
-          skipped += 1;
+          filtered += 1;
           continue;
         }
 
@@ -95,7 +96,7 @@ router.post("/import", upload.single("file"), (req, res) => {
 
     importRows(rows.slice(1));
 
-    return res.json({ data: { added, skipped, total } });
+    return res.json({ data: { added, skipped, filtered, total } });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

@@ -97,6 +97,46 @@ export async function getTags() {
   return request("/api/tags");
 }
 
+export async function getDestinations() {
+  return request("/api/destinations");
+}
+
+export async function importDestinations(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", "/api/destinations/import");
+    xhr.responseType = "text";
+
+    xhr.onload = () => {
+      let data = null;
+
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch (error) {
+        reject(new Error("Invalid JSON response"));
+        return;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+        return;
+      }
+
+      reject(new Error(data?.error || "Destination import failed"));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Destination import failed"));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export async function exportCatalog() {
   return request("/api/export");
 }
