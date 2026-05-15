@@ -78,6 +78,19 @@ CREATE TABLE IF NOT EXISTS photo_tags (
   FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS destinations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  city TEXT NOT NULL,
+  country TEXT NOT NULL,
+  date_start TEXT NOT NULL,
+  date_end TEXT NOT NULL,
+  duration_days INTEGER,
+  sort_order INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(city, date_start)
+);
+
 CREATE INDEX IF NOT EXISTS idx_photos_processing_status ON photos (processing_status);
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos (captured_at);
+CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start);

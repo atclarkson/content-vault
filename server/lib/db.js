@@ -27,6 +27,7 @@ function initializeDatabase() {
 
   database.exec(schemaSql);
   ensurePhotoColumns(database);
+  ensureDestinationsTable(database);
   seedPeople(database);
 
   return database;
@@ -108,6 +109,24 @@ function seedPeople(database) {
   });
 
   insertMany(defaultPeople);
+}
+
+function ensureDestinationsTable(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS destinations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      city TEXT NOT NULL,
+      country TEXT NOT NULL,
+      date_start TEXT NOT NULL,
+      date_end TEXT NOT NULL,
+      duration_days INTEGER,
+      sort_order INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(city, date_start)
+    )
+  `);
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start)");
 }
 
 function getDb() {
