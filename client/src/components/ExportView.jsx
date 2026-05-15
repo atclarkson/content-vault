@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { exportCatalog, getPhotos, importDestinations } from "../api";
+import {
+  exportCatalog,
+  getPhotos,
+  getVideos,
+  importDestinations,
+  refreshVideoStats,
+  syncYouTube
+} from "../api";
 
 function getMissingCount(photos, field) {
   if (field === "alt_text") {
@@ -42,53 +49,68 @@ export default function ExportView() {
     missingPeople: 0,
     missingTags: 0
   });
+  const [videoStats, setVideoStats] = useState({
+    totalVideos: 0,
+    shorts: 0,
+    longform: 0
+  });
   const [destinationFile, setDestinationFile] = useState(null);
   const [isImportingDestinations, setIsImportingDestinations] = useState(false);
   const [destinationImportMessage, setDestinationImportMessage] = useState("");
   const [destinationImportError, setDestinationImportError] = useState("");
   const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [isLoadingVideoStats, setIsLoadingVideoStats] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
+  const [isRefreshingYouTubeStats, setIsRefreshingYouTubeStats] = useState(false);
+  const [youtubeMessage, setYoutubeMessage] = useState("");
+  const [youtubeError, setYoutubeError] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let isActive = true;
+  async function loadPhotoStats() {
+    setIsLoadingStats(true);
+    setError("");
 
-    async function loadStats() {
-      setIsLoadingStats(true);
-      setError("");
+    try {
+      const response = await getPhotos();
+      const photos = response?.data || [];
 
-      try {
-        const response = await getPhotos();
-        const photos = response?.data || [];
-
-        if (!isActive) {
-          return;
-        }
-
-        setStats({
-          totalPhotos: photos.length,
-          missingAltText: getMissingCount(photos, "alt_text"),
-          missingPeople: getMissingCount(photos, "people"),
-          missingTags: getMissingCount(photos, "tags")
-        });
-      } catch (loadError) {
-        if (!isActive) {
-          return;
-        }
-
-        setError(loadError.message || "Failed to load export stats");
-      } finally {
-        if (isActive) {
-          setIsLoadingStats(false);
-        }
-      }
+      setStats({
+        totalPhotos: photos.length,
+        missingAltText: getMissingCount(photos, "alt_text"),
+        missingPeople: getMissingCount(photos, "people"),
+        missingTags: getMissingCount(photos, "tags")
+      });
+    } catch (loadError) {
+      setError(loadError.message || "Failed to load export stats");
+    } finally {
+      setIsLoadingStats(false);
     }
+  }
 
-    loadStats();
+  async function loadVideoStats() {
+    setIsLoadingVideoStats(true);
+    setYoutubeError("");
 
-    return () => {
-      isActive = false;
-    };
+    try {
+      const response = await getVideos();
+      const videos = response?.data || [];
+
+      setVideoStats({
+        totalVideos: videos.length,
+        shorts: videos.filter((video) => video.video_type === "short").length,
+        longform: videos.filter((video) => video.video_type !== "short").length
+      });
+    } catch (loadError) {
+      setYoutubeError(loadError.message || "Failed to load YouTube stats");
+    } finally {
+      setIsLoadingVideoStats(false);
+    }
+  }
+
+  useEffect(() => {
+    loadPhotoStats();
+    loadVideoStats();
   }, []);
 
   async function handleExport() {
@@ -126,6 +148,40 @@ export default function ExportView() {
       setDestinationImportError(importError.message || "Failed to import destinations");
     } finally {
       setIsImportingDestinations(false);
+    }
+  }
+
+  async function handleSyncYouTube() {
+    setIsSyncingYouTube(true);
+    setYoutubeMessage("");
+    setYoutubeError("");
+
+    try {
+      const response = await syncYouTube();
+      const summary = response?.data || {};
+      setYoutubeMessage(`${summary.added || 0} videos added, ${summary.skipped || 0} already up to date.`);
+      await loadVideoStats();
+    } catch (syncError) {
+      setYoutubeError(syncError.message || "Failed to sync YouTube videos");
+    } finally {
+      setIsSyncingYouTube(false);
+    }
+  }
+
+  async function handleRefreshYouTubeStats() {
+    setIsRefreshingYouTubeStats(true);
+    setYoutubeMessage("");
+    setYoutubeError("");
+
+    try {
+      const response = await refreshVideoStats();
+      const summary = response?.data || {};
+      setYoutubeMessage(`Stats updated for ${summary.updated || 0} videos.`);
+      await loadVideoStats();
+    } catch (refreshError) {
+      setYoutubeError(refreshError.message || "Failed to refresh YouTube stats");
+    } finally {
+      setIsRefreshingYouTubeStats(false);
     }
   }
 
@@ -193,6 +249,54 @@ export default function ExportView() {
         {destinationImportError ? (
           <div className="mt-4 bg-red-50 px-4 py-3 text-sm text-red-700">
             {destinationImportError}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">YouTube</p>
+            <p className="mt-3 text-sm text-stone-600">
+              Sync new uploads and refresh live video statistics from YouTube.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <StatCard label="Total Videos" value={isLoadingVideoStats ? "..." : videoStats.totalVideos} />
+          <StatCard label="Shorts" value={isLoadingVideoStats ? "..." : videoStats.shorts} />
+          <StatCard label="Longform" value={isLoadingVideoStats ? "..." : videoStats.longform} />
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleSyncYouTube}
+            disabled={isSyncingYouTube || isRefreshingYouTubeStats}
+            className="btn-primary"
+          >
+            {isSyncingYouTube ? "Checking..." : "Check for New Videos"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRefreshYouTubeStats}
+            disabled={isRefreshingYouTubeStats || isSyncingYouTube}
+            className="btn-secondary"
+          >
+            {isRefreshingYouTubeStats ? "Refreshing..." : "Refresh All Stats"}
+          </button>
+        </div>
+
+        {youtubeMessage ? (
+          <div className="mt-4 bg-green-50 px-4 py-3 text-sm text-green-700">
+            {youtubeMessage}
+          </div>
+        ) : null}
+
+        {youtubeError ? (
+          <div className="mt-4 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {youtubeError}
           </div>
         ) : null}
       </div>

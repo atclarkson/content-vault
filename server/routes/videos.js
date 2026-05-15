@@ -627,8 +627,11 @@ async function suggestVideoLocation(video, destinations) {
     "You are helping classify a family travel video.",
     "Suggest the most likely filmed city, filmed country, filming start date, and filming end date.",
     "Use clues in the title and description, cross-reference against the known destinations, and prefer conservative guesses.",
-    "Return only valid JSON with this exact shape:",
-    '{"filmed_city": string|null, "filmed_country": string|null, "date_filmed": string|null, "date_filmed_end": string|null, "confidence": string, "reasoning": string}',
+    "Respond with ONLY a JSON object.",
+    "Do not include any preamble, explanation, markdown fences, or extra text.",
+    "The exact format must be:",
+    '{"filmed_city":"...","filmed_country":"...","date_filmed":"YYYY-MM-DD","date_filmed_end":"YYYY-MM-DD","confidence":"high|medium|low","reasoning":"..."}',
+    "Use null when you genuinely cannot infer a field.",
     "",
     `Video title: ${video.title || ""}`,
     `Video description: ${video.description || ""}`,
@@ -647,7 +650,7 @@ async function suggestVideoLocation(video, destinations) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 500,
+      max_tokens: 1000,
       messages: [
         {
           role: "user",
@@ -670,9 +673,15 @@ async function suggestVideoLocation(video, destinations) {
   }
 
   try {
-    return JSON.parse(text);
+    return JSON.parse(extractJsonObject(stripMarkdownCodeFences(text)));
   } catch (error) {
-    throw new Error("Anthropic returned invalid JSON for location suggestion");
+    console.error("Failed to parse Anthropic video location suggestion JSON:", {
+      video_id: video.id,
+      raw_response: text,
+    });
+    throw new Error(
+      "Anthropic returned a location suggestion that could not be parsed as JSON",
+    );
   }
 }
 
@@ -683,6 +692,26 @@ function extractTextFromAnthropicResponse(data) {
     .map((block) => block.text)
     .join("\n")
     .trim();
+}
+
+function stripMarkdownCodeFences(text) {
+  return String(text || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+function extractJsonObject(text) {
+  const normalizedText = String(text || "");
+  const startIndex = normalizedText.lastIndexOf("{");
+  const endIndex = normalizedText.lastIndexOf("}");
+
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    return normalizedText;
+  }
+
+  return normalizedText.slice(startIndex, endIndex + 1);
 }
 
 module.exports = router;

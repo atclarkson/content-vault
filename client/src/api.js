@@ -62,6 +62,12 @@ export async function generateCaption(id) {
   });
 }
 
+export async function generateVideoCaption(id) {
+  return request(`/api/caption/video/${id}`, {
+    method: "POST"
+  });
+}
+
 export async function updatePhoto(id, data) {
   return jsonRequest(`/api/photos/${id}`, "PUT", data);
 }
@@ -99,6 +105,50 @@ export async function getTags() {
 
 export async function getDestinations() {
   return request("/api/destinations");
+}
+
+export async function getVideos() {
+  return request("/api/videos");
+}
+
+export async function getVideo(id) {
+  return request(`/api/videos/${id}`);
+}
+
+export async function updateVideo(id, data) {
+  return jsonRequest(`/api/videos/${id}`, "PUT", data);
+}
+
+export async function deleteVideo(id) {
+  return request(`/api/videos/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export async function syncYouTube() {
+  return request("/api/videos/sync", {
+    method: "POST"
+  });
+}
+
+export async function refreshVideoStats() {
+  return request("/api/videos/refresh-stats", {
+    method: "POST"
+  });
+}
+
+export async function suggestVideoLocation(id) {
+  return request(`/api/videos/${id}/suggest-location`, {
+    method: "POST"
+  });
+}
+
+export async function getSettings() {
+  return request("/api/settings");
+}
+
+export async function updateSetting(key, value) {
+  return jsonRequest(`/api/settings/${encodeURIComponent(key)}`, "PUT", { value });
 }
 
 export async function importDestinations(file) {

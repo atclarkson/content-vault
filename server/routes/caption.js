@@ -5,6 +5,85 @@ const router = express.Router();
 
 initializeDatabase();
 
+router.post("/video/:id", async (req, res) => {
+  try {
+    const db = getDb();
+    const videoId = normalizeVideoId(req.params.id);
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      return res
+        .status(500)
+        .json({ error: "ANTHROPIC_API_KEY is not configured" });
+    }
+
+    const video = db
+      .prepare(
+        `
+      SELECT *
+      FROM videos
+      WHERE id = ?
+        AND deleted_at IS NULL
+    `,
+      )
+      .get(videoId);
+
+    if (!video) {
+      return res.status(404).json({ error: "Video not found" });
+    }
+
+    if (!video.thumbnail_url) {
+      return res
+        .status(400)
+        .json({ error: "Video does not have a thumbnail URL" });
+    }
+
+    const enrichedVideo = attachVideoPeopleAndTags(db, video);
+    const imageBase64 = await fetchImageAsBase64(enrichedVideo.thumbnail_url);
+    const prompt = buildVideoCaptionPrompt(enrichedVideo);
+    const anthropicResponse = await requestCaptionFromAnthropic(
+      apiKey,
+      imageBase64,
+      prompt,
+    );
+    const parsedResponse = parseAnthropicText(anthropicResponse);
+
+    if (!parsedResponse.aiCaption) {
+      throw new Error("Anthropic response did not include a caption");
+    }
+
+    const nextAltText =
+      enrichedVideo.alt_text && String(enrichedVideo.alt_text).trim()
+        ? enrichedVideo.alt_text
+        : parsedResponse.altText;
+
+    db.prepare(
+      `
+      UPDATE videos
+      SET ai_caption = ?,
+          alt_text = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+    ).run(parsedResponse.aiCaption, nextAltText || null, videoId);
+
+    return res.json({
+      data: {
+        ai_caption: parsedResponse.aiCaption,
+        alt_text: nextAltText || null,
+      },
+    });
+  } catch (error) {
+    if (error.message === "Invalid video id") {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res
+      .status(500)
+      .json({ error: error.message || "Failed to generate video caption" });
+  }
+});
+
 router.post("/:id", async (req, res) => {
   try {
     const db = getDb();
@@ -216,6 +295,46 @@ function buildCaptionPrompt(photo) {
   ].join("\n");
 }
 
+function buildVideoCaptionPrompt(video) {
+  const people = (video.people || []).map((person) => person.name);
+  const tags = video.tags || [];
+  const locationParts = [video.filmed_city, video.filmed_country].filter(Boolean);
+
+  return [
+    "You are writing captions for a personal family travel blog. Write exactly like a real person would, casual, specific, direct.",
+    "",
+    "Rules:",
+    "- 1-2 sentences max for the caption",
+    "- Mention people by name, location, and approximate time when available",
+    "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
+    "- Be specific, not generic. Avoid vague positive filler.",
+    "- Never end a sentence with a participial phrase like '...capturing a moment of...' or '...reflecting their...' or '...highlighting the...'",
+    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore",
+    "- Do not use AI-sounding wording or talk about 'content', 'storytelling', 'narrative', 'authenticity', or 'the viewer'",
+    "- Never use 'not just X, but Y' or 'more than just' constructions",
+    "- Do not list three things in a row for emphasis",
+    "- Do not editorialize about significance or meaning",
+    "- Never use em dashes (—). Use a comma, period, or rephrase the sentence instead. Em dashes are one of the strongest identifiers of AI-written text.",
+    "- Write like you were there, not like you are describing metadata",
+    "",
+    "Video metadata:",
+    `People: ${people.length > 0 ? people.join(", ") : "None listed"}`,
+    `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
+    `Filmed date: ${video.date_filmed || "Unknown"}`,
+    `Published date: ${video.date_published || "Unknown"}`,
+    `Tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
+    `Video category: ${video.video_category || "Unknown"}`,
+    `Title: ${video.title || "Not set"}`,
+    `Description: ${video.description || "Not set"}`,
+    `Private notes/context: ${video.notes_for_ai || "Not set"}`,
+    "Use the private notes/context to understand the moment, but do not quote or paraphrase it too literally unless it naturally fits.",
+    "",
+    "Return exactly this format:",
+    "AI_CAPTION: <caption here>",
+    "ALT_TEXT: <alt text here>",
+  ].join("\n");
+}
+
 function attachPeopleAndTags(db, photo) {
   const people = db
     .prepare(
@@ -248,11 +367,53 @@ function attachPeopleAndTags(db, photo) {
   };
 }
 
+function attachVideoPeopleAndTags(db, video) {
+  const people = db
+    .prepare(
+      `
+    SELECT people.id, people.name
+    FROM video_people
+    INNER JOIN people ON people.id = video_people.person_id
+    WHERE video_people.video_id = ?
+    ORDER BY people.name
+  `,
+    )
+    .all(video.id);
+  const tags = db
+    .prepare(
+      `
+    SELECT tags.name
+    FROM video_tags
+    INNER JOIN tags ON tags.id = video_tags.tag_id
+    WHERE video_tags.video_id = ?
+    ORDER BY tags.name
+  `,
+    )
+    .all(video.id)
+    .map((row) => row.name);
+
+  return {
+    ...video,
+    people,
+    tags,
+  };
+}
+
 function normalizeSingleId(value) {
   const id = Number(value);
 
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error("Invalid photo id");
+  }
+
+  return id;
+}
+
+function normalizeVideoId(value) {
+  const id = Number(value);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Invalid video id");
   }
 
   return id;

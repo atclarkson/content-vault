@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDestinations, getPhotos, updatePhoto, uploadPhotos } from "../api";
+import { getDestinations, getPhotos, getVideos, updatePhoto, uploadPhotos } from "../api";
 import BulkActionBar from "./BulkActionBar";
 import PhotoEditor from "./PhotoEditor";
 import PhotoFilters from "./PhotoFilters";
 import PhotoGrid from "./PhotoGrid";
+import VideoEditor from "./VideoEditor";
 
 const CONTENT_TYPE_OPTIONS = [
   { id: "all", label: "All", disabled: false },
   { id: "photos", label: "Photos", disabled: false },
-  { id: "videos", label: "Videos", disabled: true }
+  { id: "videos", label: "Videos", disabled: false }
 ];
 
 function formatMonthRange(dateStart, dateEnd) {
@@ -20,8 +21,42 @@ function formatMonthRange(dateStart, dateEnd) {
   return `${formatter.format(new Date(dateStart))} – ${formatter.format(new Date(dateEnd))}`;
 }
 
+function formatCompactCount(value, noun) {
+  const formattedValue = new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(Number(value || 0));
+
+  return `${formattedValue} ${noun}`;
+}
+
+function formatVideoDuration(totalSeconds) {
+  const seconds = Number(totalSeconds || 0);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "0:00";
+  }
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
 function getPhotoTimestamp(photo) {
   const value = photo.captured_at || photo.uploaded_at;
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getVideoTimestamp(video) {
+  const value = video.date_filmed || video.date_published || video.created_at;
   const timestamp = value ? new Date(value).getTime() : Number.NaN;
 
   return Number.isNaN(timestamp) ? null : timestamp;
@@ -33,6 +68,23 @@ function sortPhotosForDisplay(photos, sortDirection) {
   sorted.sort((left, right) => {
     const leftTime = getPhotoTimestamp(left) ?? 0;
     const rightTime = getPhotoTimestamp(right) ?? 0;
+
+    if (sortDirection === "oldest") {
+      return leftTime - rightTime || left.id - right.id;
+    }
+
+    return rightTime - leftTime || right.id - left.id;
+  });
+
+  return sorted;
+}
+
+function sortVideosForDisplay(videos, sortDirection) {
+  const sorted = [...videos];
+
+  sorted.sort((left, right) => {
+    const leftTime = getVideoTimestamp(left) ?? 0;
+    const rightTime = getVideoTimestamp(right) ?? 0;
 
     if (sortDirection === "oldest") {
       return leftTime - rightTime || left.id - right.id;
@@ -58,11 +110,13 @@ function parseCsvList(value) {
 export default function TimelineView({ people, tags }) {
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [videos, setVideos] = useState([]);
   const [filters, setFilters] = useState({});
   const [sortDirection, setSortDirection] = useState("newest");
   const [contentType, setContentType] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [editingPhoto, setEditingPhoto] = useState(null);
+  const [editingVideo, setEditingVideo] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -89,6 +143,17 @@ export default function TimelineView({ people, tags }) {
     });
   }
 
+  function syncLoadedVideos(nextVideos) {
+    setVideos(nextVideos);
+    setEditingVideo((currentVideo) => {
+      if (!currentVideo) {
+        return null;
+      }
+
+      return nextVideos.find((video) => video.id === currentVideo.id) || null;
+    });
+  }
+
   useEffect(() => {
     let isActive = true;
 
@@ -97,20 +162,19 @@ export default function TimelineView({ people, tags }) {
       setError("");
 
       try {
-        const [destinationsResponse, photosResponse] = await Promise.all([
+        const [destinationsResponse, photosResponse, videosResponse] = await Promise.all([
           getDestinations(),
-          getPhotos(filters)
+          getPhotos(filters),
+          getVideos()
         ]);
 
         if (!isActive) {
           return;
         }
 
-        const nextDestinations = destinationsResponse?.data || [];
-        const nextPhotos = photosResponse?.data || [];
-
-        setDestinations(nextDestinations);
-        syncLoadedPhotos(nextPhotos, { resetSelection: true });
+        setDestinations(destinationsResponse?.data || []);
+        syncLoadedPhotos(photosResponse?.data || [], { resetSelection: true });
+        syncLoadedVideos(videosResponse?.data || []);
       } catch (loadError) {
         if (!isActive) {
           return;
@@ -152,8 +216,7 @@ export default function TimelineView({ people, tags }) {
           return;
         }
 
-        const nextPhotos = photosResponse?.data || [];
-        syncLoadedPhotos(nextPhotos);
+        syncLoadedPhotos(photosResponse?.data || []);
       } catch (pollError) {
         if (!isActive) {
           return;
@@ -171,22 +234,41 @@ export default function TimelineView({ people, tags }) {
 
   const groupedTimeline = useMemo(() => {
     const photosByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
-    const undated = [];
+    const videosByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
+    const undatedPhotos = [];
+    const undatedVideos = [];
+    const brandedVideos = [];
 
     for (const photo of photos) {
       if (!photo.captured_at) {
-        undated.push(photo);
+        undatedPhotos.push(photo);
         continue;
       }
 
-      const matchingDestination = findMatchingDestination(photo, destinations);
+      const matchingDestination = findMatchingDestinationForPhoto(photo, destinations);
 
       if (!matchingDestination) {
-        undated.push(photo);
+        undatedPhotos.push(photo);
         continue;
       }
 
       photosByDestinationId.get(matchingDestination.id).push(photo);
+    }
+
+    for (const video of videos) {
+      if (video.video_category && video.video_category !== "travel") {
+        brandedVideos.push(video);
+        continue;
+      }
+
+      const matchingDestination = findMatchingDestinationForVideo(video, destinations);
+
+      if (!matchingDestination) {
+        undatedVideos.push(video);
+        continue;
+      }
+
+      videosByDestinationId.get(matchingDestination.id).push(video);
     }
 
     const destinationBlocks = [...destinations]
@@ -196,14 +278,17 @@ export default function TimelineView({ people, tags }) {
       })
       .map((destination) => ({
         ...destination,
-        photos: sortPhotosForDisplay(photosByDestinationId.get(destination.id) || [], sortDirection)
+        photos: sortPhotosForDisplay(photosByDestinationId.get(destination.id) || [], sortDirection),
+        videos: sortVideosForDisplay(videosByDestinationId.get(destination.id) || [], sortDirection)
       }));
 
     return {
       destinations: destinationBlocks,
-      undated: sortPhotosForDisplay(undated, sortDirection)
+      undatedPhotos: sortPhotosForDisplay(undatedPhotos, sortDirection),
+      undatedVideos: sortVideosForDisplay(undatedVideos, sortDirection),
+      brandedVideos: sortVideosForDisplay(brandedVideos, sortDirection)
     };
-  }, [destinations, photos, sortDirection]);
+  }, [destinations, photos, videos, sortDirection]);
 
   const activeMissingFilters = useMemo(() => parseCsvList(filters.missing), [filters.missing]);
   const showNoContentDestinations = activeMissingFilters.includes("no_content");
@@ -213,15 +298,23 @@ export default function TimelineView({ people, tags }) {
       return groupedTimeline.destinations;
     }
 
-    return groupedTimeline.destinations.filter((destination) => destination.photos.length === 0);
+    return groupedTimeline.destinations.filter((destination) => (
+      destination.photos.length === 0 && destination.videos.length === 0
+    ));
   }, [groupedTimeline.destinations, showNoContentDestinations]);
 
   const locationOptions = useMemo(() => ({
     neighborhoods: buildUniqueLocationOptions(photos, "neighborhood"),
-    cities: buildUniqueLocationOptions(photos, "city"),
+    cities: buildUniqueLocationOptions([
+      ...photos.map((photo) => ({ city: photo.city })),
+      ...videos.map((video) => ({ city: video.filmed_city }))
+    ], "city"),
     regions: buildUniqueLocationOptions(photos, "region"),
-    countries: buildUniqueLocationOptions(photos, "country")
-  }), [photos]);
+    countries: buildUniqueLocationOptions([
+      ...photos.map((photo) => ({ country: photo.country })),
+      ...videos.map((video) => ({ country: video.filmed_country }))
+    ], "country")
+  }), [photos, videos]);
   const isBulkEditing = selectedIds.size > 1;
   const hasActiveFilters = Object.entries(filters).some(([, value]) => {
     if (value === undefined || value === null) {
@@ -262,6 +355,18 @@ export default function TimelineView({ people, tags }) {
       return nextSelectedIds;
     });
     setEditingPhoto(null);
+  }
+
+  function handleSavedVideo(updatedVideo) {
+    setVideos((currentVideos) => currentVideos.map((currentVideo) => (
+      currentVideo.id === updatedVideo.id ? updatedVideo : currentVideo
+    )));
+    setEditingVideo(updatedVideo);
+  }
+
+  function handleDeletedVideo(videoId) {
+    setVideos((currentVideos) => currentVideos.filter((video) => video.id !== videoId));
+    setEditingVideo(null);
   }
 
   function handleBulkAction() {
@@ -310,6 +415,8 @@ export default function TimelineView({ people, tags }) {
       setActiveDropZone("");
     }
   }
+
+  const filteredPhotos = useMemo(() => sortPhotosForDisplay(photos, sortDirection), [photos, sortDirection]);
 
   return (
     <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
@@ -385,7 +492,7 @@ export default function TimelineView({ people, tags }) {
           <section className="panel flex min-h-[360px] items-center justify-center p-8">
             <div className="text-center">
               <p className="text-sm font-medium text-stone-700">Loading timeline...</p>
-              <p className="mt-2 text-sm text-stone-500">Fetching destinations and photos.</p>
+              <p className="mt-2 text-sm text-stone-500">Fetching destinations, photos, and videos.</p>
             </div>
           </section>
         ) : hasActiveFilters && !showNoContentDestinations ? (
@@ -394,7 +501,7 @@ export default function TimelineView({ people, tags }) {
               <div>
                 <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Filtered Results</p>
                 <h2 className="mt-2 text-2xl font-semibold text-stone-900">
-                  Showing filtered results — {photos.length} photo{photos.length === 1 ? "" : "s"}
+                  Showing filtered results — {filteredPhotos.length} photo{filteredPhotos.length === 1 ? "" : "s"}
                 </h2>
               </div>
 
@@ -403,90 +510,165 @@ export default function TimelineView({ people, tags }) {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <PhotoGrid
-                photos={sortPhotosForDisplay(photos, sortDirection)}
-                onPhotoClick={setEditingPhoto}
-                selectedIds={selectedIds}
-                onSelectionChange={setSelectedIds}
-                embedded
-                showSortControl={false}
-              />
-            </div>
+            {contentType === "videos" ? (
+              <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
+                Video results do not use the photo filters.
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <PhotoGrid
+                  photos={filteredPhotos}
+                  onPhotoClick={(photo) => {
+                    setEditingVideo(null);
+                    setEditingPhoto(photo);
+                  }}
+                  selectedIds={selectedIds}
+                  onSelectionChange={setSelectedIds}
+                  embedded
+                  showSortControl={false}
+                />
+              </div>
+            )}
           </section>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-8 pb-4">
-              {displayedDestinations.map((destination) => (
-                <section key={destination.id} className="border border-stone-300 bg-white">
-                  <div className="border-b border-stone-200 px-5 py-4">
-                    <div className="flex flex-wrap items-end justify-between gap-4">
-                      <div>
-                        <h2 className="text-2xl font-semibold text-stone-900">
-                          {destination.city}, {destination.country}
-                        </h2>
-                        <p className="mt-2 text-sm text-stone-500">
-                          {formatMonthRange(destination.date_start, destination.date_end)}
-                          {" · "}
-                          {destination.duration_days || "?"} days
-                          {" · "}
-                          {destination.photos.length} photo{destination.photos.length === 1 ? "" : "s"}
-                        </p>
+              {displayedDestinations.map((destination) => {
+                const visiblePhotos = contentType === "videos" ? [] : destination.photos;
+                const visibleVideos = contentType === "photos" ? [] : destination.videos;
+                const hasVisibleContent = visiblePhotos.length > 0 || visibleVideos.length > 0;
+
+                return (
+                  <section key={destination.id} className="border border-stone-300 bg-white">
+                    <div className="border-b border-stone-200 px-5 py-4">
+                      <div className="flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                          <h2 className="text-2xl font-semibold text-stone-900">
+                            {destination.city}, {destination.country}
+                          </h2>
+                          <p className="mt-2 text-sm text-stone-500">
+                            {formatMonthRange(destination.date_start, destination.date_end)}
+                            {" · "}
+                            {destination.duration_days || "?"} days
+                            {" · "}
+                            {destination.photos.length} photo{destination.photos.length === 1 ? "" : "s"}
+                            {" · "}
+                            {destination.videos.length} video{destination.videos.length === 1 ? "" : "s"}
+                          </p>
+                        </div>
                       </div>
                     </div>
+
+                    <div className="space-y-5 px-5 py-5">
+                      {visiblePhotos.length > 0 ? (
+                        <PhotoGrid
+                          photos={visiblePhotos}
+                          onPhotoClick={(photo) => {
+                            setEditingVideo(null);
+                            setEditingPhoto(photo);
+                          }}
+                          selectedIds={selectedIds}
+                          onSelectionChange={setSelectedIds}
+                          embedded
+                          showSortControl={false}
+                        />
+                      ) : null}
+
+                      {visibleVideos.length > 0 ? (
+                        <VideoGrid
+                          videos={visibleVideos}
+                          onVideoClick={(video) => {
+                            setEditingPhoto(null);
+                            setEditingVideo(video);
+                          }}
+                        />
+                      ) : null}
+
+                      {!hasVisibleContent && contentType !== "videos" ? (
+                        <DestinationDropZone
+                          destination={destination}
+                          isActive={activeDropZone === destination.id}
+                          isUploading={isUploadingToDestination && activeDropZone === destination.id}
+                          onDragEnter={() => setActiveDropZone(destination.id)}
+                          onDragLeave={() => {
+                            if (!isUploadingToDestination) {
+                              setActiveDropZone("");
+                            }
+                          }}
+                          onDropFiles={(files) => handleDestinationDrop(destination, files)}
+                        />
+                      ) : null}
+                    </div>
+                  </section>
+                );
+              })}
+
+              {contentType !== "photos" && groupedTimeline.brandedVideos.length > 0 ? (
+                <section className="border border-stone-300 bg-white">
+                  <div className="border-b border-stone-200 px-5 py-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Brand & Sponsored Content</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-stone-900">Brand & Sponsored Content</h2>
+                    <p className="mt-2 text-sm text-stone-500">
+                      {groupedTimeline.brandedVideos.length} video{groupedTimeline.brandedVideos.length === 1 ? "" : "s"}
+                    </p>
                   </div>
 
                   <div className="px-5 py-5">
-                    {destination.photos.length > 0 ? (
-                      <PhotoGrid
-                        photos={destination.photos}
-                        onPhotoClick={setEditingPhoto}
-                        selectedIds={selectedIds}
-                        onSelectionChange={setSelectedIds}
-                        embedded
-                        showSortControl={false}
-                      />
-                    ) : (
-                      <DestinationDropZone
-                        destination={destination}
-                        isActive={activeDropZone === destination.id}
-                        isUploading={isUploadingToDestination && activeDropZone === destination.id}
-                        onDragEnter={() => setActiveDropZone(destination.id)}
-                        onDragLeave={() => {
-                          if (!isUploadingToDestination) {
-                            setActiveDropZone("");
-                          }
-                        }}
-                        onDropFiles={(files) => handleDestinationDrop(destination, files)}
-                      />
-                    )}
+                    <VideoGrid
+                      videos={groupedTimeline.brandedVideos}
+                      onVideoClick={(video) => {
+                        setEditingPhoto(null);
+                        setEditingVideo(video);
+                      }}
+                    />
                   </div>
                 </section>
-              ))}
+              ) : null}
 
               {!showNoContentDestinations ? (
                 <section className="border border-stone-300 bg-white">
                   <div className="border-b border-stone-200 px-5 py-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Undated</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-stone-900">Undated Photos</h2>
+                    <h2 className="mt-2 text-2xl font-semibold text-stone-900">Undated Content</h2>
                     <p className="mt-2 text-sm text-stone-500">
-                      {groupedTimeline.undated.length} photo{groupedTimeline.undated.length === 1 ? "" : "s"}
+                      {groupedTimeline.undatedPhotos.length} photo{groupedTimeline.undatedPhotos.length === 1 ? "" : "s"}
+                      {" · "}
+                      {groupedTimeline.undatedVideos.length} video{groupedTimeline.undatedVideos.length === 1 ? "" : "s"}
                     </p>
                   </div>
 
-                  <div className="px-5 py-5">
-                    {groupedTimeline.undated.length > 0 ? (
+                  <div className="space-y-5 px-5 py-5">
+                    {contentType !== "videos" && groupedTimeline.undatedPhotos.length > 0 ? (
                       <PhotoGrid
-                        photos={groupedTimeline.undated}
-                        onPhotoClick={setEditingPhoto}
+                        photos={groupedTimeline.undatedPhotos}
+                        onPhotoClick={(photo) => {
+                          setEditingVideo(null);
+                          setEditingPhoto(photo);
+                        }}
                         selectedIds={selectedIds}
                         onSelectionChange={setSelectedIds}
                         embedded
                         showSortControl={false}
                       />
-                    ) : (
-                      <p className="text-sm text-stone-500">No undated photos.</p>
-                    )}
+                    ) : null}
+
+                    {contentType !== "photos" && groupedTimeline.undatedVideos.length > 0 ? (
+                      <VideoGrid
+                        videos={groupedTimeline.undatedVideos}
+                        onVideoClick={(video) => {
+                          setEditingPhoto(null);
+                          setEditingVideo(video);
+                        }}
+                      />
+                    ) : null}
+
+                    {(contentType === "videos" && groupedTimeline.undatedVideos.length === 0)
+                    || (contentType === "photos" && groupedTimeline.undatedPhotos.length === 0)
+                    || (contentType === "all"
+                      && groupedTimeline.undatedPhotos.length === 0
+                      && groupedTimeline.undatedVideos.length === 0) ? (
+                        <p className="text-sm text-stone-500">No undated content.</p>
+                      ) : null}
                   </div>
                 </section>
               ) : null}
@@ -510,6 +692,15 @@ export default function TimelineView({ people, tags }) {
             locationOptions={locationOptions}
             onAction={handleBulkAction}
             onClear={() => setSelectedIds(new Set())}
+          />
+        ) : editingVideo ? (
+          <VideoEditor
+            video={editingVideo}
+            people={people}
+            tags={tags}
+            onClose={() => setEditingVideo(null)}
+            onSaved={handleSavedVideo}
+            onDeleted={handleDeletedVideo}
           />
         ) : (
           <PhotoEditor
@@ -591,15 +782,59 @@ function DestinationDropZone({ destination, isActive, isUploading, onDragEnter, 
   );
 }
 
-function buildUniqueLocationOptions(photos, field) {
+function VideoGrid({ videos, onVideoClick }) {
+  return (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      {videos.map((video) => (
+        <article
+          key={video.id}
+          className="group relative overflow-hidden rounded-[1.75rem] border border-stone-300 bg-stone-100 transition hover:border-stone-400"
+        >
+          <button type="button" onClick={() => onVideoClick(video)} className="block w-full text-left">
+            <div className="relative aspect-video overflow-hidden bg-stone-200">
+              {video.thumbnail_url ? (
+                <img
+                  src={video.thumbnail_url}
+                  alt={video.title || "Video thumbnail"}
+                  className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-stone-500">No thumbnail</div>
+              )}
+
+              <div className="absolute bottom-2 right-2 rounded-full bg-stone-950/80 px-2 py-1 text-xs font-medium text-white">
+                {formatVideoDuration(video.duration_seconds)}
+              </div>
+            </div>
+
+            <div className="space-y-2 px-3 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+                  {video.video_type === "short" ? "Short" : "Longform"}
+                </span>
+                <span className="text-xs text-stone-500">{formatCompactCount(video.view_count, "views")}</span>
+              </div>
+
+              <h3 className="line-clamp-2 text-sm font-medium leading-5 text-stone-900">
+                {video.title || "Untitled video"}
+              </h3>
+            </div>
+          </button>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function buildUniqueLocationOptions(items, field) {
   return [...new Set(
-    photos
-      .map((photo) => String(photo?.[field] || "").trim())
+    items
+      .map((item) => String(item?.[field] || "").trim())
       .filter(Boolean)
   )].sort((left, right) => left.localeCompare(right));
 }
 
-function findMatchingDestination(photo, destinations) {
+function findMatchingDestinationForPhoto(photo, destinations) {
   if (!photo.captured_at) {
     return null;
   }
@@ -610,39 +845,88 @@ function findMatchingDestination(photo, destinations) {
     return null;
   }
 
-  const city = String(photo.city || "").trim().toLowerCase();
-  const country = String(photo.country || "").trim().toLowerCase();
+  return matchDestinationByLocationAndDate({
+    city: photo.city,
+    country: photo.country,
+    timestamp: photoTime
+  }, destinations);
+}
 
-  if (city) {
-    const cityMatches = destinations
-      .filter((destination) => String(destination.city || "").trim().toLowerCase() === city)
-      .filter((destination) => isWithinDateWindow(photoTime, destination, 3));
+function findMatchingDestinationForVideo(video, destinations) {
+  if (video.video_category && video.video_category !== "travel") {
+    return null;
+  }
 
-    if (cityMatches.length > 0) {
-      return sortDestinationsByBestDateMatch(cityMatches, photoTime)[0];
+  const filmedTime = getTimestamp(video.date_filmed);
+
+  if (filmedTime !== null) {
+    const filmedMatch = matchDestinationByLocationAndDate({
+      city: video.filmed_city,
+      country: video.filmed_country,
+      timestamp: filmedTime
+    }, destinations);
+
+    if (filmedMatch) {
+      return filmedMatch;
     }
   }
 
-  if (country) {
-    const countryMatches = destinations
-      .filter((destination) => String(destination.country || "").trim().toLowerCase() === country)
-      .filter((destination) => isWithinDateRange(photoTime, destination));
+  const publishedTime = getTimestamp(video.date_published);
 
-    if (countryMatches.length > 0) {
-      return sortDestinationsByContainedThenStart(countryMatches, photoTime)[0];
-    }
-  }
-
-  const dateMatches = destinations.filter((destination) => isWithinDateRange(photoTime, destination));
-
-  if (dateMatches.length > 0) {
-    return sortDestinationsByContainedThenStart(dateMatches, photoTime)[0];
+  if (publishedTime !== null) {
+    return matchDestinationByLocationAndDate({
+      city: video.filmed_city,
+      country: video.filmed_country,
+      timestamp: publishedTime
+    }, destinations);
   }
 
   return null;
 }
 
-function isWithinDateWindow(photoTime, destination, toleranceDays) {
+function getTimestamp(value) {
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function matchDestinationByLocationAndDate({ city, country, timestamp }, destinations) {
+  if (timestamp === null) {
+    return null;
+  }
+
+  const normalizedCity = String(city || "").trim().toLowerCase();
+  const normalizedCountry = String(country || "").trim().toLowerCase();
+
+  if (normalizedCity) {
+    const cityMatches = destinations
+      .filter((destination) => String(destination.city || "").trim().toLowerCase() === normalizedCity)
+      .filter((destination) => isWithinDateWindow(timestamp, destination, 3));
+
+    if (cityMatches.length > 0) {
+      return sortDestinationsByContainedThenStart(cityMatches, timestamp)[0];
+    }
+  }
+
+  if (normalizedCountry) {
+    const countryMatches = destinations
+      .filter((destination) => String(destination.country || "").trim().toLowerCase() === normalizedCountry)
+      .filter((destination) => isWithinDateRange(timestamp, destination));
+
+    if (countryMatches.length > 0) {
+      return sortDestinationsByContainedThenStart(countryMatches, timestamp)[0];
+    }
+  }
+
+  const dateMatches = destinations.filter((destination) => isWithinDateRange(timestamp, destination));
+
+  if (dateMatches.length > 0) {
+    return sortDestinationsByContainedThenStart(dateMatches, timestamp)[0];
+  }
+
+  return null;
+}
+
+function isWithinDateWindow(itemTime, destination, toleranceDays) {
   const startTime = new Date(destination.date_start).getTime();
   const endTime = new Date(destination.date_end).getTime();
 
@@ -651,10 +935,10 @@ function isWithinDateWindow(photoTime, destination, toleranceDays) {
   }
 
   const toleranceMs = toleranceDays * 24 * 60 * 60 * 1000;
-  return photoTime >= startTime - toleranceMs && photoTime < endTime + toleranceMs;
+  return itemTime >= startTime - toleranceMs && itemTime < endTime + toleranceMs;
 }
 
-function isWithinDateRange(photoTime, destination) {
+function isWithinDateRange(itemTime, destination) {
   const startTime = new Date(destination.date_start).getTime();
   const endTime = new Date(destination.date_end).getTime();
 
@@ -662,26 +946,13 @@ function isWithinDateRange(photoTime, destination) {
     return false;
   }
 
-  return photoTime >= startTime && photoTime < endTime;
+  return itemTime >= startTime && itemTime < endTime;
 }
 
-function sortDestinationsByBestDateMatch(destinations, photoTime) {
+function sortDestinationsByContainedThenStart(destinations, itemTime) {
   return [...destinations].sort((left, right) => {
-    const leftContains = isWithinDateRange(photoTime, left);
-    const rightContains = isWithinDateRange(photoTime, right);
-
-    if (leftContains !== rightContains) {
-      return leftContains ? -1 : 1;
-    }
-
-    return new Date(left.date_start).getTime() - new Date(right.date_start).getTime();
-  });
-}
-
-function sortDestinationsByContainedThenStart(destinations, photoTime) {
-  return [...destinations].sort((left, right) => {
-    const leftContains = isWithinDateRange(photoTime, left);
-    const rightContains = isWithinDateRange(photoTime, right);
+    const leftContains = isWithinDateRange(itemTime, left);
+    const rightContains = isWithinDateRange(itemTime, right);
 
     if (leftContains !== rightContains) {
       return leftContains ? -1 : 1;
