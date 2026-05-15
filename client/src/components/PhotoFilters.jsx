@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 
 const MISSING_FIELD_OPTIONS = [
+  { id: "no_content", label: "No Content" },
   { id: "city", label: "City" },
   { id: "country", label: "Country" },
   { id: "people", label: "People" },

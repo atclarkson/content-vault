@@ -28,6 +28,7 @@ function initializeDatabase() {
   database.exec(schemaSql);
   ensurePhotoColumns(database);
   ensureDestinationsTable(database);
+  ensureVideoTables(database);
   seedPeople(database);
 
   return database;
@@ -127,6 +128,74 @@ function ensureDestinationsTable(database) {
   `);
 
   database.exec("CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start)");
+}
+
+function ensureVideoTables(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      youtube_id TEXT NOT NULL UNIQUE,
+      youtube_url TEXT NOT NULL,
+      title TEXT,
+      description TEXT,
+      thumbnail_url TEXT,
+      duration_seconds INTEGER,
+      video_type TEXT NOT NULL DEFAULT 'longform' CHECK (video_type IN ('short', 'longform')),
+      video_type_manually_set INTEGER NOT NULL DEFAULT 0,
+      video_category TEXT NOT NULL DEFAULT 'travel' CHECK (video_category IN ('travel', 'sponsored', 'review', 'other')),
+      date_published TEXT,
+      date_filmed TEXT,
+      date_filmed_end TEXT,
+      date_filmed_source TEXT DEFAULT 'none' CHECK (date_filmed_source IN ('none', 'manual', 'ai_suggested', 'confirmed')),
+      view_count INTEGER DEFAULT 0,
+      like_count INTEGER DEFAULT 0,
+      comment_count INTEGER DEFAULT 0,
+      stats_refreshed_at TEXT,
+      filmed_city TEXT,
+      filmed_country TEXT,
+      filmed_location_source TEXT DEFAULT 'none' CHECK (filmed_location_source IN ('none', 'manual', 'ai_suggested', 'confirmed')),
+      alt_text TEXT,
+      ai_caption TEXT,
+      notes_for_ai TEXT,
+      deleted_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS video_people (
+      video_id INTEGER NOT NULL,
+      person_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (video_id, person_id),
+      FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+      FOREIGN KEY (person_id) REFERENCES people (id) ON DELETE CASCADE
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS video_tags (
+      video_id INTEGER NOT NULL,
+      tag_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (video_id, tag_id),
+      FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_filmed ON videos (date_filmed)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_videos_deleted_at ON videos (deleted_at)");
 }
 
 function getDb() {

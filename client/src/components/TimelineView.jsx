@@ -44,6 +44,17 @@ function sortPhotosForDisplay(photos, sortDirection) {
   return sorted;
 }
 
+function parseCsvList(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function TimelineView({ people, tags }) {
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -193,6 +204,17 @@ export default function TimelineView({ people, tags }) {
       undated: sortPhotosForDisplay(undated, sortDirection)
     };
   }, [destinations, photos, sortDirection]);
+
+  const activeMissingFilters = useMemo(() => parseCsvList(filters.missing), [filters.missing]);
+  const showNoContentDestinations = activeMissingFilters.includes("no_content");
+
+  const displayedDestinations = useMemo(() => {
+    if (!showNoContentDestinations) {
+      return groupedTimeline.destinations;
+    }
+
+    return groupedTimeline.destinations.filter((destination) => destination.photos.length === 0);
+  }, [groupedTimeline.destinations, showNoContentDestinations]);
 
   const locationOptions = useMemo(() => ({
     neighborhoods: buildUniqueLocationOptions(photos, "neighborhood"),
@@ -366,7 +388,7 @@ export default function TimelineView({ people, tags }) {
               <p className="mt-2 text-sm text-stone-500">Fetching destinations and photos.</p>
             </div>
           </section>
-        ) : hasActiveFilters ? (
+        ) : hasActiveFilters && !showNoContentDestinations ? (
           <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
             <div className="mb-6 flex items-end justify-between gap-4">
               <div>
@@ -395,7 +417,7 @@ export default function TimelineView({ people, tags }) {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-8 pb-4">
-              {groupedTimeline.destinations.map((destination) => (
+              {displayedDestinations.map((destination) => (
                 <section key={destination.id} className="border border-stone-300 bg-white">
                   <div className="border-b border-stone-200 px-5 py-4">
                     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -442,30 +464,38 @@ export default function TimelineView({ people, tags }) {
                 </section>
               ))}
 
-              <section className="border border-stone-300 bg-white">
-                <div className="border-b border-stone-200 px-5 py-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Undated</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-stone-900">Undated Photos</h2>
-                  <p className="mt-2 text-sm text-stone-500">
-                    {groupedTimeline.undated.length} photo{groupedTimeline.undated.length === 1 ? "" : "s"}
-                  </p>
-                </div>
+              {!showNoContentDestinations ? (
+                <section className="border border-stone-300 bg-white">
+                  <div className="border-b border-stone-200 px-5 py-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Undated</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-stone-900">Undated Photos</h2>
+                    <p className="mt-2 text-sm text-stone-500">
+                      {groupedTimeline.undated.length} photo{groupedTimeline.undated.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
 
-                <div className="px-5 py-5">
-                  {groupedTimeline.undated.length > 0 ? (
-                    <PhotoGrid
-                      photos={groupedTimeline.undated}
-                      onPhotoClick={setEditingPhoto}
-                      selectedIds={selectedIds}
-                      onSelectionChange={setSelectedIds}
-                      embedded
-                      showSortControl={false}
-                    />
-                  ) : (
-                    <p className="text-sm text-stone-500">No undated photos.</p>
-                  )}
-                </div>
-              </section>
+                  <div className="px-5 py-5">
+                    {groupedTimeline.undated.length > 0 ? (
+                      <PhotoGrid
+                        photos={groupedTimeline.undated}
+                        onPhotoClick={setEditingPhoto}
+                        selectedIds={selectedIds}
+                        onSelectionChange={setSelectedIds}
+                        embedded
+                        showSortControl={false}
+                      />
+                    ) : (
+                      <p className="text-sm text-stone-500">No undated photos.</p>
+                    )}
+                  </div>
+                </section>
+              ) : null}
+
+              {showNoContentDestinations && displayedDestinations.length === 0 ? (
+                <section className="border border-stone-300 bg-white px-5 py-8 text-sm text-stone-500">
+                  No destinations are currently missing content.
+                </section>
+              ) : null}
             </div>
           </div>
         )}
