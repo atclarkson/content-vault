@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { bulkUpdate, createPerson, getPeople } from "../api";
+import LocationAutocompleteInput from "./LocationAutocompleteInput";
+
+const PRIMARY_PEOPLE = ["Adam", "Lindsay", "Lily", "Cora", "Harper"];
 
 function ActionMenu({ title, children }) {
   return (
-    <div className="rounded-[1.5rem] border border-stone-300 bg-white p-4 shadow-panel">
+    <div className="border-t border-stone-200 pt-4">
       <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">{title}</p>
       {children}
     </div>
   );
 }
 
-export default function BulkActionBar({ selectedIds, people, allTags, onAction, onClear }) {
+export default function BulkActionBar({ selectedIds, people, allTags, locationOptions, onAction, onClear }) {
   const [activeAction, setActiveAction] = useState("");
   const [availablePeople, setAvailablePeople] = useState(people);
   const [tagName, setTagName] = useState("");
@@ -100,6 +103,11 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
     ));
   }
 
+  const primaryPeople = PRIMARY_PEOPLE
+    .map((name) => availablePeople.find((person) => person.name === name))
+    .filter(Boolean);
+  const otherPeople = availablePeople.filter((person) => !PRIMARY_PEOPLE.includes(person.name));
+
   function buildLocationUpdates() {
     const updates = {};
 
@@ -156,14 +164,40 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
     }
   }
 
-  return (
-    <div className="fixed bottom-6 left-[264px] right-8 z-50">
-      <div className="panel border-stone-300 bg-white/95 p-4 backdrop-blur">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="mr-2 text-sm font-medium text-stone-800">
-            {selectedIds.size} photo{selectedIds.size === 1 ? "" : "s"} selected
-          </p>
+  function addExistingPersonByName(name) {
+    const trimmedName = name.trim();
 
+    if (!trimmedName) {
+      return false;
+    }
+
+    const person = availablePeople.find((entry) => entry.name.toLowerCase() === trimmedName.toLowerCase());
+
+    if (!person) {
+      return false;
+    }
+
+    setSelectedPeopleIds((currentIds) => (
+      currentIds.includes(person.id) ? currentIds : [...currentIds, person.id]
+    ));
+    setNewPersonName("");
+    return true;
+  }
+
+  return (
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-l border-stone-300 bg-white">
+      <div className="border-b border-stone-200 px-6 py-5">
+        <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Bulk Edit</p>
+        <h2 className="mt-2 text-lg font-semibold text-stone-900">
+          Editing {selectedIds.size} photo{selectedIds.size === 1 ? "" : "s"}
+        </h2>
+        <p className="mt-2 text-sm text-stone-500">
+          Changes here will be applied to every selected photo.
+        </p>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex flex-wrap gap-3">
           <button type="button" onClick={() => setActiveAction("add-tag")} className="btn-secondary" disabled={isSubmitting}>
             Add Tag
           </button>
@@ -213,7 +247,7 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
         {activeAction === "remove-tag" ? (
           <div className="mt-4">
             <ActionMenu title="Remove Tag">
-              <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-3">
+              <div className="max-h-48 space-y-2 overflow-auto border border-stone-200 bg-stone-50 p-3">
                 {allTags.map((tag) => (
                   <label key={tag.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
                     <input
@@ -243,19 +277,44 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
         {activeAction === "add-person" ? (
           <div className="mt-4">
             <ActionMenu title="Add Person">
-              <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-3">
-                {availablePeople.map((person) => (
-                  <label key={person.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
-                    <input
-                      type="checkbox"
-                      checked={selectedPeopleIds.includes(person.id)}
-                      onChange={() => togglePerson(person.id)}
-                      className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                    />
-                    <span className="text-sm text-stone-700">{person.name}</span>
-                  </label>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                {primaryPeople.map((person) => {
+                  const isSelected = selectedPeopleIds.includes(person.id);
+
+                  return (
+                    <button
+                      key={person.id}
+                      type="button"
+                      onClick={() => togglePerson(person.id)}
+                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                        isSelected
+                          ? "border-amber-400 bg-amber-100 text-amber-900"
+                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
+                      }`}
+                    >
+                      {person.name}
+                    </button>
+                  );
+                })}
               </div>
+              {selectedPeopleIds.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedPeopleIds
+                    .map((id) => availablePeople.find((person) => person.id === id))
+                    .filter(Boolean)
+                    .filter((person) => !PRIMARY_PEOPLE.includes(person.name))
+                    .map((person) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        onClick={() => togglePerson(person.id)}
+                        className="rounded-full border border-stone-300 bg-stone-100 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-200"
+                      >
+                        {person.name} ×
+                      </button>
+                    ))}
+                </div>
+              ) : null}
               <div className="mt-3">
                 <button
                   type="button"
@@ -272,17 +331,29 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
                   value={newPersonName}
                   onChange={(event) => setNewPersonName(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") {
+                    if (event.key === "Enter" || event.key === ",") {
                       event.preventDefault();
-                      handleCreatePerson();
+                      if (!addExistingPersonByName(newPersonName)) {
+                        handleCreatePerson();
+                      }
                     }
                   }}
                   className="field min-w-[240px] flex-1"
-                  placeholder="Add person..."
+                  placeholder="Add another person..."
+                  list="bulk-add-person-suggestions"
                 />
+                <datalist id="bulk-add-person-suggestions">
+                  {otherPeople.map((person) => (
+                    <option key={person.id} value={person.name} />
+                  ))}
+                </datalist>
                 <button
                   type="button"
-                  onClick={handleCreatePerson}
+                  onClick={() => {
+                    if (!addExistingPersonByName(newPersonName)) {
+                      handleCreatePerson();
+                    }
+                  }}
                   disabled={isSubmitting || !newPersonName.trim()}
                   className="btn-secondary"
                 >
@@ -296,18 +367,64 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
         {activeAction === "remove-person" ? (
           <div className="mt-4">
             <ActionMenu title="Remove Person">
-              <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-3">
-                {availablePeople.map((person) => (
-                  <label key={person.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
-                    <input
-                      type="checkbox"
-                      checked={selectedPeopleIds.includes(person.id)}
-                      onChange={() => togglePerson(person.id)}
-                      className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                    />
-                    <span className="text-sm text-stone-700">{person.name}</span>
-                  </label>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                {primaryPeople.map((person) => {
+                  const isSelected = selectedPeopleIds.includes(person.id);
+
+                  return (
+                    <button
+                      key={person.id}
+                      type="button"
+                      onClick={() => togglePerson(person.id)}
+                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                        isSelected
+                          ? "border-amber-400 bg-amber-100 text-amber-900"
+                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
+                      }`}
+                    >
+                      {person.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedPeopleIds.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedPeopleIds
+                    .map((id) => availablePeople.find((person) => person.id === id))
+                    .filter(Boolean)
+                    .filter((person) => !PRIMARY_PEOPLE.includes(person.name))
+                    .map((person) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        onClick={() => togglePerson(person.id)}
+                        className="rounded-full border border-stone-300 bg-stone-100 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-200"
+                      >
+                        {person.name} ×
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+              <div className="mt-3">
+                <input
+                  type="text"
+                  value={newPersonName}
+                  onChange={(event) => setNewPersonName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === ",") {
+                      event.preventDefault();
+                      addExistingPersonByName(newPersonName);
+                    }
+                  }}
+                  className="field"
+                  placeholder="Select another person to remove..."
+                  list="bulk-remove-person-suggestions"
+                />
+                <datalist id="bulk-remove-person-suggestions">
+                  {otherPeople.map((person) => (
+                    <option key={person.id} value={person.name} />
+                  ))}
+                </datalist>
               </div>
               <div className="mt-3">
                 <button
@@ -326,33 +443,33 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
         {activeAction === "set-location" ? (
           <div className="mt-4">
             <ActionMenu title="Set Location">
-              <div className="grid gap-3 md:grid-cols-3">
-                <input
-                  type="text"
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <LocationAutocompleteInput
+                  id="bulk-neighborhood"
                   value={location.neighborhood}
-                  onChange={(event) => setLocation((current) => ({ ...current, neighborhood: event.target.value }))}
-                  className="field"
+                  onChange={(value) => setLocation((current) => ({ ...current, neighborhood: value }))}
+                  options={locationOptions?.neighborhoods || []}
                   placeholder="Neighborhood"
                 />
-                <input
-                  type="text"
+                <LocationAutocompleteInput
+                  id="bulk-city"
                   value={location.city}
-                  onChange={(event) => setLocation((current) => ({ ...current, city: event.target.value }))}
-                  className="field"
+                  onChange={(value) => setLocation((current) => ({ ...current, city: value }))}
+                  options={locationOptions?.cities || []}
                   placeholder="City"
                 />
-                <input
-                  type="text"
+                <LocationAutocompleteInput
+                  id="bulk-region"
                   value={location.region}
-                  onChange={(event) => setLocation((current) => ({ ...current, region: event.target.value }))}
-                  className="field"
+                  onChange={(value) => setLocation((current) => ({ ...current, region: value }))}
+                  options={locationOptions?.regions || []}
                   placeholder="Region"
                 />
-                <input
-                  type="text"
+                <LocationAutocompleteInput
+                  id="bulk-country"
                   value={location.country}
-                  onChange={(event) => setLocation((current) => ({ ...current, country: event.target.value }))}
-                  className="field"
+                  onChange={(value) => setLocation((current) => ({ ...current, country: value }))}
+                  options={locationOptions?.countries || []}
                   placeholder="Country"
                 />
               </div>
@@ -373,6 +490,6 @@ export default function BulkActionBar({ selectedIds, people, allTags, onAction, 
           </div>
         ) : null}
       </div>
-    </div>
+    </aside>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getPhotos } from "../api";
 import BulkActionBar from "./BulkActionBar";
 import PhotoFilters from "./PhotoFilters";
@@ -8,6 +8,7 @@ import PhotoEditor from "./PhotoEditor";
 export default function PhotosView({ people, tags }) {
   const [photos, setPhotos] = useState([]);
   const [filters, setFilters] = useState({});
+  const [sort, setSort] = useState("newest");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,7 +23,7 @@ export default function PhotosView({ people, tags }) {
       setError("");
 
       try {
-        const response = await getPhotos(filters);
+        const response = await getPhotos({ ...filters, sort });
 
         if (!isActive) {
           return;
@@ -57,7 +58,7 @@ export default function PhotosView({ people, tags }) {
     return () => {
       isActive = false;
     };
-  }, [filters, refreshNonce]);
+  }, [filters, refreshNonce, sort]);
 
   function handleApplyFilters(nextFilters) {
     setFilters(nextFilters);
@@ -88,10 +89,44 @@ export default function PhotosView({ people, tags }) {
     setRefreshNonce((currentValue) => currentValue + 1);
   }
 
+  function navigatePhoto(offset) {
+    if (!editingPhoto) {
+      return;
+    }
+
+    const currentIndex = photos.findIndex((photo) => photo.id === editingPhoto.id);
+
+    if (currentIndex === -1) {
+      return;
+    }
+
+    const nextPhoto = photos[currentIndex + offset];
+
+    if (!nextPhoto) {
+      return;
+    }
+
+    setEditingPhoto(nextPhoto);
+  }
+
+  const locationOptions = useMemo(() => ({
+    neighborhoods: buildUniqueLocationOptions(photos, "neighborhood"),
+    cities: buildUniqueLocationOptions(photos, "city"),
+    regions: buildUniqueLocationOptions(photos, "region"),
+    countries: buildUniqueLocationOptions(photos, "country")
+  }), [photos]);
+  const isBulkEditing = selectedIds.size > 1;
+
   return (
-    <div className="relative flex flex-1 gap-6">
-      <div className={`${editingPhoto ? "min-w-0 flex-1 pr-[28rem]" : "w-full"}`}>
-        <PhotoFilters people={people} tags={tags} onApply={handleApplyFilters} onClear={handleClearFilters} />
+    <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <PhotoFilters
+          people={people}
+          tags={tags}
+          locationOptions={locationOptions}
+          onApply={handleApplyFilters}
+          onClear={handleClearFilters}
+        />
 
         {error ? (
           <div className="panel mb-6 border-red-300/70 bg-red-50 px-5 py-4 text-sm text-red-700">
@@ -107,33 +142,51 @@ export default function PhotosView({ people, tags }) {
             </div>
           </section>
         ) : (
-          <PhotoGrid
-            photos={photos}
-            onPhotoClick={setEditingPhoto}
-            selectedIds={selectedIds}
-            onSelectionChange={setSelectedIds}
-          />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <PhotoGrid
+              photos={photos}
+              sort={sort}
+              onSortChange={setSort}
+              onPhotoClick={setEditingPhoto}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+            />
+          </div>
         )}
       </div>
 
-      {editingPhoto ? (
-        <PhotoEditor
-          photo={editingPhoto}
-          people={people}
-          tags={tags}
-          onClose={() => setEditingPhoto(null)}
-          onSaved={handleSavedPhoto}
-          onDeleted={handleDeletedPhoto}
-        />
-      ) : null}
-
-      <BulkActionBar
-        selectedIds={selectedIds}
-        people={people}
-        allTags={tags}
-        onAction={handleBulkAction}
-        onClear={() => setSelectedIds(new Set())}
-      />
+      <div className="hidden min-h-0 w-[560px] shrink-0 xl:flex">
+        {isBulkEditing ? (
+          <BulkActionBar
+            selectedIds={selectedIds}
+            people={people}
+            allTags={tags}
+            locationOptions={locationOptions}
+            onAction={handleBulkAction}
+            onClear={() => setSelectedIds(new Set())}
+          />
+        ) : (
+          <PhotoEditor
+            photo={editingPhoto}
+            people={people}
+            tags={tags}
+            locationOptions={locationOptions}
+            onClose={() => setEditingPhoto(null)}
+            onSaved={handleSavedPhoto}
+            onDeleted={handleDeletedPhoto}
+            onNavigatePrevious={() => navigatePhoto(-1)}
+            onNavigateNext={() => navigatePhoto(1)}
+          />
+        )}
+      </div>
     </div>
   );
+}
+
+function buildUniqueLocationOptions(photos, field) {
+  return [...new Set(
+    photos
+      .map((photo) => String(photo?.[field] || "").trim())
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right));
 }

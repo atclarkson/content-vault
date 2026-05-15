@@ -32,7 +32,7 @@ export default function Sidebar({ currentView, onNavigate }) {
         })}
       </nav>
 
-      <div className="mt-auto rounded-3xl border border-stone-300 bg-white/80 p-4">
+      <div className="mt-auto border-t border-stone-300/80 pt-4">
         <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Local Only</p>
         <p className="mt-3 text-sm leading-6 text-stone-600">
           Family travel media catalog for personal workflows, running on this machine only.

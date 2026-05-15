@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deletePhoto, updatePhoto } from "../api";
+import LocationAutocompleteInput from "./LocationAutocompleteInput";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
 
@@ -48,36 +49,58 @@ function buildPayload({
   };
 }
 
-export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onDeleted }) {
-  const [title, setTitle] = useState(photo.title || "");
-  const [description, setDescription] = useState(photo.description || "");
-  const [altText, setAltText] = useState(photo.alt_text || "");
-  const [capturedAt, setCapturedAt] = useState(formatDateForInput(photo.captured_at));
-  const [selectedPeopleIds, setSelectedPeopleIds] = useState((photo.people || []).map((person) => person.id));
-  const [tagNames, setTagNames] = useState(photo.tags || []);
+function addTagIfMissing(currentTags, nextTag) {
+  if (currentTags.includes(nextTag)) {
+    return currentTags;
+  }
+
+  return [...currentTags, nextTag];
+}
+
+export default function PhotoEditor({
+  photo,
+  people,
+  tags,
+  locationOptions,
+  onClose,
+  onSaved,
+  onDeleted,
+  onNavigatePrevious,
+  onNavigateNext
+}) {
+  const [title, setTitle] = useState(photo?.title || "");
+  const [description, setDescription] = useState(photo?.description || "");
+  const [altText, setAltText] = useState(photo?.alt_text || "");
+  const [capturedAt, setCapturedAt] = useState(formatDateForInput(photo?.captured_at));
+  const [selectedPeopleIds, setSelectedPeopleIds] = useState((photo?.people || []).map((person) => person.id));
+  const [tagNames, setTagNames] = useState(photo?.tags || []);
   const [catalogPeople, setCatalogPeople] = useState(people);
-  const [neighborhood, setNeighborhood] = useState(photo.neighborhood || "");
-  const [city, setCity] = useState(photo.city || "");
-  const [region, setRegion] = useState(photo.region || "");
-  const [country, setCountry] = useState(photo.country || "");
+  const [neighborhood, setNeighborhood] = useState(photo?.neighborhood || "");
+  const [city, setCity] = useState(photo?.city || "");
+  const [region, setRegion] = useState(photo?.region || "");
+  const [country, setCountry] = useState(photo?.country || "");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [saveState, setSaveState] = useState("idle");
   const [error, setError] = useState("");
   const lastSavedPayloadRef = useRef("");
+  const saveTimeoutRef = useRef(null);
+  const savePromiseRef = useRef(null);
 
   useEffect(() => {
-    setTitle(photo.title || "");
-    setDescription(photo.description || "");
-    setAltText(photo.alt_text || "");
-    setCapturedAt(formatDateForInput(photo.captured_at));
-    setSelectedPeopleIds((photo.people || []).map((person) => person.id));
-    setTagNames(photo.tags || []);
-    setNeighborhood(photo.neighborhood || "");
-    setCity(photo.city || "");
-    setRegion(photo.region || "");
-    setCountry(photo.country || "");
-    lastSavedPayloadRef.current = JSON.stringify(buildPayload({
+    setTitle(photo?.title || "");
+    setDescription(photo?.description || "");
+    setAltText(photo?.alt_text || "");
+    setCapturedAt(formatDateForInput(photo?.captured_at));
+    setSelectedPeopleIds((photo?.people || []).map((person) => person.id));
+    setTagNames(photo?.tags || []);
+    setNeighborhood(photo?.neighborhood || "");
+    setCity(photo?.city || "");
+    setRegion(photo?.region || "");
+    setCountry(photo?.country || "");
+    setIsLightboxOpen(false);
+    lastSavedPayloadRef.current = photo ? JSON.stringify(buildPayload({
       title: photo.title || "",
       description: photo.description || "",
       altText: photo.alt_text || "",
@@ -88,7 +111,7 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
       city: photo.city || "",
       region: photo.region || "",
       country: photo.country || ""
-    }));
+    })) : "";
     setSaveState("idle");
     setError("");
   }, [photo]);
@@ -97,7 +120,7 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
     setCatalogPeople(people);
   }, [people]);
 
-  const showExifSection = useMemo(() => hasExifData(photo), [photo]);
+  const showExifSection = useMemo(() => (photo ? hasExifData(photo) : false), [photo]);
   const currentPayload = useMemo(() => buildPayload({
     title,
     description,
@@ -112,35 +135,122 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
   }), [title, description, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
   const serializedPayload = useMemo(() => JSON.stringify(currentPayload), [currentPayload]);
 
+  async function persistChanges() {
+    if (!photo) {
+      return true;
+    }
+
+    if (serializedPayload === lastSavedPayloadRef.current) {
+      return true;
+    }
+
+    if (savePromiseRef.current) {
+      return savePromiseRef.current;
+    }
+
+    setIsSaving(true);
+    setSaveState("saving");
+    setError("");
+
+    const savePromise = updatePhoto(photo.id, currentPayload)
+      .then((response) => {
+        lastSavedPayloadRef.current = serializedPayload;
+        setSaveState("saved");
+        onSaved(response.data);
+        return true;
+      })
+      .catch((saveError) => {
+        setError(saveError.message || "Failed to save photo");
+        setSaveState("error");
+        return false;
+      })
+      .finally(() => {
+        setIsSaving(false);
+        savePromiseRef.current = null;
+      });
+
+    savePromiseRef.current = savePromise;
+    return savePromise;
+  }
+
   useEffect(() => {
+    if (!photo) {
+      return;
+    }
+
     if (serializedPayload === lastSavedPayloadRef.current) {
       return;
     }
 
     setSaveState("dirty");
 
-    const timeoutId = window.setTimeout(async () => {
-      setIsSaving(true);
-      setSaveState("saving");
-      setError("");
-
-      try {
-        const response = await updatePhoto(photo.id, currentPayload);
-        lastSavedPayloadRef.current = serializedPayload;
-        setSaveState("saved");
-        onSaved(response.data);
-      } catch (saveError) {
-        setError(saveError.message || "Failed to save photo");
-        setSaveState("error");
-      } finally {
-        setIsSaving(false);
-      }
+    saveTimeoutRef.current = window.setTimeout(() => {
+      persistChanges();
     }, 700);
 
     return () => {
-      window.clearTimeout(timeoutId);
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
     };
-  }, [photo.id, currentPayload, onSaved, serializedPayload]);
+  }, [photo, serializedPayload]);
+
+  useEffect(() => () => {
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!photo) {
+      return;
+    }
+
+    async function handleKeyDown(event) {
+      if (!event.metaKey) {
+        return;
+      }
+
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+
+      const target = event.target;
+
+      if (
+        target instanceof HTMLElement
+        && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")
+      ) {
+        event.preventDefault();
+      } else {
+        event.preventDefault();
+      }
+
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      const didSave = await persistChanges();
+
+      if (!didSave) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        onNavigatePrevious?.();
+      } else {
+        onNavigateNext?.();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [photo, onNavigateNext, onNavigatePrevious, serializedPayload, currentPayload]);
 
   async function handleDelete() {
     if (!window.confirm("Are you sure?")) {
@@ -164,8 +274,35 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
     setCatalogPeople((currentPeople) => [...currentPeople, person].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
+  function handleNoPeople() {
+    setSelectedPeopleIds([]);
+    setTagNames((currentTags) => addTagIfMissing(currentTags, "no-people"));
+  }
+
+  if (!photo) {
+    return (
+      <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-l border-stone-300 bg-white">
+        <div className="border-b border-stone-200 px-6 py-5">
+          <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photo Editor</p>
+          <h2 className="mt-2 text-lg font-semibold text-stone-900">No photo selected</h2>
+          <p className="mt-2 text-sm text-stone-500">Click a thumbnail to review metadata and make edits here.</p>
+        </div>
+
+        <div className="flex flex-1 items-center justify-center px-8 py-10">
+          <div className="max-w-sm text-center">
+            <p className="text-sm font-medium text-stone-700">The editor stays open now.</p>
+            <p className="mt-2 text-sm leading-6 text-stone-500">
+              Pick any photo from the grid and its image, metadata, people, tags, and location fields will appear in
+              this column.
+            </p>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="fixed right-0 top-0 z-40 flex h-screen w-[560px] max-w-full flex-col border-l border-stone-300 bg-white shadow-panel">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-l border-stone-300 bg-white">
       <div className="flex items-start justify-between border-b border-stone-200 px-6 py-5">
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photo Editor</p>
@@ -179,21 +316,34 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
           </p>
         </div>
 
-        <button type="button" onClick={onClose} className="btn-secondary px-3 py-2" aria-label="Close editor">
-          ×
+        <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 text-sm" aria-label="Clear editor">
+          Clear
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="overflow-hidden rounded-[2rem] border border-stone-300 bg-stone-100">
+      <div className="border-b border-stone-200 px-6 py-5">
+        <div className="overflow-hidden border border-stone-300 bg-stone-100">
           {photo.large_url ? (
-            <img src={photo.large_url} alt={photo.alt_text || photo.original_filename} className="w-full object-contain" />
+            <button
+              type="button"
+              onClick={() => setIsLightboxOpen(true)}
+              className="block w-full cursor-zoom-in"
+              aria-label="Open larger photo preview"
+            >
+              <img
+                src={photo.large_url}
+                alt={photo.alt_text || photo.original_filename}
+                className="max-h-[300px] w-full object-contain"
+              />
+            </button>
           ) : (
-            <div className="flex aspect-[4/3] items-center justify-center text-sm text-stone-500">No image available</div>
+            <div className="flex h-[220px] items-center justify-center text-sm text-stone-500">No image available</div>
           )}
         </div>
+      </div>
 
-        <div className="mt-6 space-y-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="space-y-5">
           <label className="block">
             <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Title</span>
             <input type="text" value={title} onChange={(event) => setTitle(event.target.value)} className="field" />
@@ -230,6 +380,7 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
               people={catalogPeople}
               onChange={setSelectedPeopleIds}
               onPersonCreated={handlePersonCreated}
+              onNoPeople={handleNoPeople}
             />
           </section>
 
@@ -238,35 +389,42 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
             <TagInput tags={tagNames} allTags={tags} onChange={setTagNames} />
           </section>
 
-          <section className="rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
+          <section className="border-t border-stone-200 pt-5">
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Location</p>
             <div className="mt-4 grid gap-4">
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-stone-500">Neighborhood</span>
-                <input
-                  type="text"
-                  value={neighborhood}
-                  onChange={(event) => setNeighborhood(event.target.value)}
-                  className="field"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-stone-500">City</span>
-                <input type="text" value={city} onChange={(event) => setCity(event.target.value)} className="field" />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-stone-500">Region</span>
-                <input type="text" value={region} onChange={(event) => setRegion(event.target.value)} className="field" />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-stone-500">Country</span>
-                <input type="text" value={country} onChange={(event) => setCountry(event.target.value)} className="field" />
-              </label>
+              <LocationAutocompleteInput
+                id="editor-neighborhood"
+                label="Neighborhood"
+                value={neighborhood}
+                onChange={setNeighborhood}
+                options={locationOptions?.neighborhoods || []}
+              />
+              <LocationAutocompleteInput
+                id="editor-city"
+                label="City"
+                value={city}
+                onChange={setCity}
+                options={locationOptions?.cities || []}
+              />
+              <LocationAutocompleteInput
+                id="editor-region"
+                label="Region"
+                value={region}
+                onChange={setRegion}
+                options={locationOptions?.regions || []}
+              />
+              <LocationAutocompleteInput
+                id="editor-country"
+                label="Country"
+                value={country}
+                onChange={setCountry}
+                options={locationOptions?.countries || []}
+              />
             </div>
           </section>
 
           {showExifSection ? (
-            <section className="rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
+            <section className="border-t border-stone-200 pt-5">
               <p className="text-xs uppercase tracking-[0.24em] text-stone-500">EXIF</p>
               <dl className="mt-4 grid gap-3 text-sm text-stone-700">
                 {photo.camera_make ? <ExifRow label="Camera Make" value={photo.camera_make} /> : null}
@@ -279,7 +437,7 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
             </section>
           ) : null}
 
-          <section className="rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
+          <section className="border-t border-stone-200 pt-5">
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Status</p>
             <div className="mt-4 flex flex-wrap gap-3 text-sm">
               <span className="rounded-full bg-white px-3 py-1.5 text-stone-700">
@@ -308,6 +466,31 @@ export default function PhotoEditor({ photo, people, tags, onClose, onSaved, onD
           </button>
         </div>
       </div>
+
+      {isLightboxOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 p-6"
+          onClick={() => setIsLightboxOpen(false)}
+        >
+          <div
+            className="relative max-h-full max-w-[min(92vw,1400px)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setIsLightboxOpen(false)}
+            className="absolute right-4 top-4 z-10 rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-stone-900 shadow"
+          >
+            Close
+          </button>
+          <img
+            src={photo.large_url}
+            alt={photo.alt_text || photo.original_filename}
+            className="max-h-[90vh] max-w-full border border-stone-300 bg-white object-contain shadow-2xl"
+          />
+        </div>
+      </div>
+      ) : null}
     </aside>
   );
 }

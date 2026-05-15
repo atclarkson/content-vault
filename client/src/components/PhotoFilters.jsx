@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import LocationAutocompleteInput from "./LocationAutocompleteInput";
 
 const MISSING_FIELD_OPTIONS = [
-  { id: "location", label: "Location" },
+  { id: "city", label: "City" },
+  { id: "country", label: "Country" },
   { id: "people", label: "People" },
   { id: "tags", label: "Tags" },
   { id: "title", label: "Title" },
@@ -104,7 +106,7 @@ function FilterDropdown({ label, selectedCount, children }) {
   );
 }
 
-export default function PhotoFilters({ people, tags, onApply, onClear }) {
+export default function PhotoFilters({ people, tags, locationOptions, onApply, onClear }) {
   const [filters, setFilters] = useState({
     missing: [],
     country: "",
@@ -153,27 +155,23 @@ export default function PhotoFilters({ people, tags, onApply, onClear }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_1.1fr_auto_auto]">
-        <label className="block">
-          <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Country</span>
-          <input
-            type="text"
-            value={filters.country}
-            onChange={(event) => updateField("country", event.target.value)}
-            className="field"
-            placeholder="Japan"
-          />
-        </label>
+        <LocationAutocompleteInput
+          id="filter-country"
+          label="Country"
+          value={filters.country}
+          onChange={(value) => updateField("country", value)}
+          options={locationOptions?.countries || []}
+          placeholder="Japan"
+        />
 
-        <label className="block">
-          <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">City</span>
-          <input
-            type="text"
-            value={filters.city}
-            onChange={(event) => updateField("city", event.target.value)}
-            className="field"
-            placeholder="Tokyo"
-          />
-        </label>
+        <LocationAutocompleteInput
+          id="filter-city"
+          label="City"
+          value={filters.city}
+          onChange={(value) => updateField("city", value)}
+          options={locationOptions?.cities || []}
+          placeholder="Tokyo"
+        />
 
         <div className="flex items-end">
           <FilterDropdown label="People" selectedCount={filters.people.length}>
@@ -218,6 +216,7 @@ export default function PhotoFilters({ people, tags, onApply, onClear }) {
             </div>
           </FilterDropdown>
         </div>
+
       </div>
 
       <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50/80 p-4">

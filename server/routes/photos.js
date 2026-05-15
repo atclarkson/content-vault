@@ -78,11 +78,12 @@ router.get("/", (req, res) => {
   try {
     const db = getDb();
     const filters = buildPhotoFilters(req.query);
+    const orderByClause = buildPhotoOrderByClause(req.query.sort);
     const photos = db.prepare(`
       SELECT photos.*
       FROM photos
       ${filters.whereClause}
-      ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC
+      ${orderByClause}
     `).all(...filters.params);
 
     const enrichedPhotos = attachPeopleAndTags(db, photos);
@@ -305,13 +306,13 @@ function buildPhotoFilters(query) {
   }
 
   if (query.country) {
-    conditions.push("photos.country = ?");
-    params.push(query.country);
+    conditions.push("LOWER(COALESCE(photos.country, '')) LIKE ?");
+    params.push(`%${String(query.country).trim().toLowerCase()}%`);
   }
 
   if (query.city) {
-    conditions.push("photos.city = ?");
-    params.push(query.city);
+    conditions.push("LOWER(COALESCE(photos.city, '')) LIKE ?");
+    params.push(`%${String(query.city).trim().toLowerCase()}%`);
   }
 
   if (query.date_from) {
@@ -351,12 +352,25 @@ function buildPhotoFilters(query) {
 }
 
 function buildMissingCondition(field) {
-  if (field === "location") {
-    return "(NULLIF(TRIM(COALESCE(photos.neighborhood, '')), '') IS NULL AND NULLIF(TRIM(COALESCE(photos.city, '')), '') IS NULL AND NULLIF(TRIM(COALESCE(photos.region, '')), '') IS NULL AND NULLIF(TRIM(COALESCE(photos.country, '')), '') IS NULL)";
+  if (field === "city") {
+    return "NULLIF(TRIM(COALESCE(photos.city, '')), '') IS NULL";
+  }
+
+  if (field === "country") {
+    return "NULLIF(TRIM(COALESCE(photos.country, '')), '') IS NULL";
   }
 
   if (field === "people") {
-    return "NOT EXISTS (SELECT 1 FROM photo_people WHERE photo_people.photo_id = photos.id)";
+    return `
+      NOT EXISTS (SELECT 1 FROM photo_people WHERE photo_people.photo_id = photos.id)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM photo_tags
+        INNER JOIN tags ON tags.id = photo_tags.tag_id
+        WHERE photo_tags.photo_id = photos.id
+          AND LOWER(tags.name) = 'no-people'
+      )
+    `;
   }
 
   if (field === "tags") {
@@ -372,6 +386,26 @@ function buildMissingCondition(field) {
   }
 
   return null;
+}
+
+function buildPhotoOrderByClause(sort) {
+  switch (sort) {
+    case "oldest":
+      return "ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) ASC, photos.id ASC";
+    case "uploaded_newest":
+      return "ORDER BY photos.uploaded_at DESC, photos.id DESC";
+    case "uploaded_oldest":
+      return "ORDER BY photos.uploaded_at ASC, photos.id ASC";
+    case "country":
+      return "ORDER BY NULLIF(TRIM(COALESCE(photos.country, '')), '') IS NULL, LOWER(COALESCE(photos.country, '')) ASC, COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
+    case "city":
+      return "ORDER BY NULLIF(TRIM(COALESCE(photos.city, '')), '') IS NULL, LOWER(COALESCE(photos.city, '')) ASC, COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
+    case "filename":
+      return "ORDER BY LOWER(COALESCE(photos.original_filename, '')) ASC, photos.id ASC";
+    case "newest":
+    default:
+      return "ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
+  }
 }
 
 function attachPeopleAndTags(db, photos) {

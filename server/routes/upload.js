@@ -23,7 +23,7 @@ const RAW_EXTENSIONS = new Set([
   ".raf",
   ".dng",
   ".pef",
-  ".srw"
+  ".srw",
 ]);
 
 const ACCEPTED_EXTENSIONS = new Set([
@@ -32,7 +32,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   ".png",
   ".heic",
   ".heif",
-  ".webp"
+  ".webp",
 ]);
 
 const EXTENSION_MIME_TYPES = {
@@ -41,14 +41,13 @@ const EXTENSION_MIME_TYPES = {
   ".png": "image/png",
   ".heic": "image/heic",
   ".heif": "image/heif",
-  ".webp": "image/webp"
+  ".webp": "image/webp",
 };
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 50 * 1024 * 1024,
-    files: 20
   },
   fileFilter(req, file, cb) {
     const extension = getExtension(file.originalname);
@@ -56,21 +55,21 @@ const upload = multer({
     if (RAW_EXTENSIONS.has(extension)) {
       return cb(
         new Error(
-          `${file.originalname} is not supported. RAW files cannot be imported. Please export a JPEG from your editing software.`
-        )
+          `${file.originalname} is not supported. RAW files cannot be imported. Please export a JPEG from your editing software.`,
+        ),
       );
     }
 
     if (!ACCEPTED_EXTENSIONS.has(extension)) {
       return cb(
         new Error(
-          `${file.originalname} is not supported. Only JPEG, PNG, HEIC, HEIF, and WebP files can be imported.`
-        )
+          `${file.originalname} is not supported. Only JPEG, PNG, HEIC, HEIF, and WebP files can be imported.`,
+        ),
       );
     }
 
     cb(null, true);
-  }
+  },
 });
 
 const findPhotoByHash = db.prepare(`
@@ -133,7 +132,7 @@ const updatePhotoLocation = db.prepare(`
   WHERE id = ?
 `);
 
-router.post("/", upload.array("files", 20), async (req, res) => {
+router.post("/", upload.array("files"), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No files uploaded" });
@@ -156,16 +155,16 @@ router.post("/", upload.array("files", 20), async (req, res) => {
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ error: "Each file must be 50MB or smaller" });
-    }
-
-    if (error.code === "LIMIT_FILE_COUNT") {
-      return res.status(400).json({ error: "A maximum of 20 files can be uploaded per request" });
+      return res
+        .status(400)
+        .json({ error: "Each file must be 50MB or smaller" });
     }
   }
 
   if (error) {
-    return res.status(getUploadErrorStatusCode(error)).json({ error: error.message });
+    return res
+      .status(getUploadErrorStatusCode(error))
+      .json({ error: error.message });
   }
 
   next();
@@ -173,7 +172,10 @@ router.use((error, req, res, next) => {
 
 async function processUpload(file) {
   const originalExtension = getExtension(file.originalname);
-  const originalMimeType = file.mimetype || EXTENSION_MIME_TYPES[originalExtension] || "application/octet-stream";
+  const originalMimeType =
+    file.mimetype ||
+    EXTENSION_MIME_TYPES[originalExtension] ||
+    "application/octet-stream";
   const fileHash = hashFile(file.buffer);
   const existingPhoto = findPhotoByHash.get(fileHash);
 
@@ -181,7 +183,7 @@ async function processUpload(file) {
     return {
       skipped: true,
       reason: "duplicate",
-      filename: file.originalname
+      filename: file.originalname,
     };
   }
 
@@ -191,19 +193,36 @@ async function processUpload(file) {
     original: `photos/original/${uuid}${originalExtension}`,
     thumbnail: `photos/thumb/${uuid}.jpg`,
     small: `photos/small/${uuid}.jpg`,
-    large: `photos/large/${uuid}.jpg`
+    large: `photos/large/${uuid}.jpg`,
   };
 
   try {
     const [originalUrl, thumbnailUrl, smallUrl, largeUrl] = await Promise.all([
-      uploadFile(keys.original, processedImage.buffers.original, originalMimeType),
-      uploadFile(keys.thumbnail, processedImage.buffers.thumbnail, processedImage.mimeType),
-      uploadFile(keys.small, processedImage.buffers.small, processedImage.mimeType),
-      uploadFile(keys.large, processedImage.buffers.large, processedImage.mimeType)
+      uploadFile(
+        keys.original,
+        processedImage.buffers.original,
+        originalMimeType,
+      ),
+      uploadFile(
+        keys.thumbnail,
+        processedImage.buffers.thumbnail,
+        processedImage.mimeType,
+      ),
+      uploadFile(
+        keys.small,
+        processedImage.buffers.small,
+        processedImage.mimeType,
+      ),
+      uploadFile(
+        keys.large,
+        processedImage.buffers.large,
+        processedImage.mimeType,
+      ),
     ]);
 
     const extractedExif = extractExifFields(processedImage.exif);
-    const hasGps = extractedExif.gpsLat !== null && extractedExif.gpsLng !== null;
+    const hasGps =
+      extractedExif.gpsLat !== null && extractedExif.gpsLng !== null;
     const processingStatus = hasGps ? "processing" : "complete";
     const geoStatus = hasGps ? "queued" : "skipped";
 
@@ -235,7 +254,7 @@ async function processUpload(file) {
       originalUrl,
       thumbnailUrl,
       smallUrl,
-      largeUrl
+      largeUrl,
     );
 
     const photo = selectPhotoById.get(insertResult.lastInsertRowid);
@@ -252,33 +271,66 @@ async function processUpload(file) {
 }
 
 function queueReverseGeocode(photoId, lat, lng) {
-  defaultQueue.add(async () => {
-    const location = await reverseGeocode(lat, lng);
+  defaultQueue
+    .add(async () => {
+      const location = await reverseGeocode(lat, lng);
 
-    if (!location) {
-      updatePhotoLocation.run(null, null, null, null, null, null, "failed", "complete", photoId);
-      return;
-    }
+      if (!location) {
+        updatePhotoLocation.run(
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "failed",
+          "complete",
+          photoId,
+        );
+        return;
+      }
 
-    const locationName = location.neighborhood || location.city || location.region || location.country || null;
-    const locationLabel = [location.neighborhood, location.city, location.region, location.country]
-      .filter(Boolean)
-      .join(", ") || null;
+      const locationName =
+        location.neighborhood ||
+        location.city ||
+        location.region ||
+        location.country ||
+        null;
+      const locationLabel =
+        [
+          location.neighborhood,
+          location.city,
+          location.region,
+          location.country,
+        ]
+          .filter(Boolean)
+          .join(", ") || null;
 
-    updatePhotoLocation.run(
-      location.neighborhood,
-      locationName,
-      locationLabel,
-      location.city,
-      location.region,
-      location.country,
-      "complete",
-      "complete",
-      photoId
-    );
-  }).catch(() => {
-    updatePhotoLocation.run(null, null, null, null, null, null, "failed", "complete", photoId);
-  });
+      updatePhotoLocation.run(
+        location.neighborhood,
+        locationName,
+        locationLabel,
+        location.city,
+        location.region,
+        location.country,
+        "complete",
+        "complete",
+        photoId,
+      );
+    })
+    .catch(() => {
+      updatePhotoLocation.run(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "failed",
+        "complete",
+        photoId,
+      );
+    });
 }
 
 async function cleanupUploadedFiles(keys) {
@@ -291,7 +343,7 @@ async function cleanupUploadedFiles(keys) {
       }
 
       return null;
-    })
+    }),
   );
 }
 
@@ -326,15 +378,28 @@ function extractExifFields(metadata) {
     const parsed = exifReader(metadata.exif);
 
     return {
-      dateTaken: parsed.Photo?.DateTimeOriginal?.toISOString() || parsed.Image?.DateTime?.toISOString() || null,
-      gpsLat: convertGps(parsed.GPSInfo?.GPSLatitude, parsed.GPSInfo?.GPSLatitudeRef),
-      gpsLng: convertGps(parsed.GPSInfo?.GPSLongitude, parsed.GPSInfo?.GPSLongitudeRef),
+      dateTaken:
+        parsed.Photo?.DateTimeOriginal?.toISOString() ||
+        parsed.Image?.DateTime?.toISOString() ||
+        null,
+      gpsLat: convertGps(
+        parsed.GPSInfo?.GPSLatitude,
+        parsed.GPSInfo?.GPSLatitudeRef,
+      ),
+      gpsLng: convertGps(
+        parsed.GPSInfo?.GPSLongitude,
+        parsed.GPSInfo?.GPSLongitudeRef,
+      ),
       cameraMake: parsed.Image?.Make || null,
       cameraModel: parsed.Image?.Model || null,
-      focalLength: parsed.Photo?.FocalLength ? `${parsed.Photo.FocalLength}mm` : null,
+      focalLength: parsed.Photo?.FocalLength
+        ? `${Math.round(parsed.Photo.FocalLength * 10) / 10}mm`
+        : null,
       iso: parsed.Photo?.ISOSpeedRatings || null,
-      shutterSpeed: parsed.Photo?.ExposureTime ? `1/${Math.round(1 / parsed.Photo.ExposureTime)}` : null,
-      aperture: parsed.Photo?.FNumber ? `f/${parsed.Photo.FNumber}` : null
+      shutterSpeed: parsed.Photo?.ExposureTime
+        ? `1/${Math.round(1 / parsed.Photo.ExposureTime)}`
+        : null,
+      aperture: parsed.Photo?.FNumber ? `f/${Math.round(parsed.Photo.FNumber * 10) / 10}` : null,
     };
   } catch {
     return allNulls();
@@ -347,7 +412,7 @@ function convertGps(values, ref) {
   }
 
   const [degrees, minutes, seconds] = values;
-  let decimal = degrees + (minutes / 60) + (seconds / 3600);
+  let decimal = degrees + minutes / 60 + seconds / 3600;
 
   if (ref === "S" || ref === "W") {
     decimal *= -1;
@@ -366,7 +431,7 @@ function allNulls() {
     focalLength: null,
     iso: null,
     shutterSpeed: null,
-    aperture: null
+    aperture: null,
   };
 }
 
