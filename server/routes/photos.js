@@ -385,6 +385,10 @@ function buildMissingCondition(field) {
     return "NULLIF(TRIM(COALESCE(photos.alt_text, '')), '') IS NULL";
   }
 
+  if (field === "ai_caption") {
+    return "NULLIF(TRIM(COALESCE(photos.ai_caption, '')), '') IS NULL";
+  }
+
   return null;
 }
 

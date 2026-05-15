@@ -56,6 +56,12 @@ export async function getPhoto(id) {
   return request(`/api/photos/${id}`);
 }
 
+export async function generateCaption(id) {
+  return request(`/api/caption/${id}`, {
+    method: "POST"
+  });
+}
+
 export async function updatePhoto(id, data) {
   return jsonRequest(`/api/photos/${id}`, "PUT", data);
 }

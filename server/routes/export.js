@@ -66,7 +66,7 @@ function mapExportPhotos(db, photos) {
     title: photo.title,
     description: photo.description,
     alt_text: photo.alt_text,
-    ai_caption: null,
+    ai_caption: photo.ai_caption || null,
     date_taken: photo.captured_at,
     date_source: photo.date_source,
     people: peopleMap.get(photo.id) || [],

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deletePhoto, updatePhoto } from "../api";
+import { deletePhoto, generateCaption, getPhoto, updatePhoto } from "../api";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
@@ -57,6 +57,10 @@ function addTagIfMissing(currentTags, nextTag) {
   return [...currentTags, nextTag];
 }
 
+function removeTagIfPresent(currentTags, targetTag) {
+  return currentTags.filter((tag) => tag !== targetTag);
+}
+
 export default function PhotoEditor({
   photo,
   people,
@@ -70,6 +74,7 @@ export default function PhotoEditor({
 }) {
   const [title, setTitle] = useState(photo?.title || "");
   const [description, setDescription] = useState(photo?.description || "");
+  const [aiCaption, setAiCaption] = useState(photo?.ai_caption || "");
   const [altText, setAltText] = useState(photo?.alt_text || "");
   const [capturedAt, setCapturedAt] = useState(formatDateForInput(photo?.captured_at));
   const [selectedPeopleIds, setSelectedPeopleIds] = useState((photo?.people || []).map((person) => person.id));
@@ -81,6 +86,7 @@ export default function PhotoEditor({
   const [country, setCountry] = useState(photo?.country || "");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [saveState, setSaveState] = useState("idle");
   const [error, setError] = useState("");
@@ -91,6 +97,7 @@ export default function PhotoEditor({
   useEffect(() => {
     setTitle(photo?.title || "");
     setDescription(photo?.description || "");
+    setAiCaption(photo?.ai_caption || "");
     setAltText(photo?.alt_text || "");
     setCapturedAt(formatDateForInput(photo?.captured_at));
     setSelectedPeopleIds((photo?.people || []).map((person) => person.id));
@@ -274,9 +281,55 @@ export default function PhotoEditor({
     setCatalogPeople((currentPeople) => [...currentPeople, person].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
+  function handlePeopleChange(nextSelectedPeopleIds) {
+    setSelectedPeopleIds(nextSelectedPeopleIds);
+
+    if (nextSelectedPeopleIds.length > 0) {
+      setTagNames((currentTags) => removeTagIfPresent(currentTags, "no-people"));
+    }
+  }
+
   function handleNoPeople() {
     setSelectedPeopleIds([]);
     setTagNames((currentTags) => addTagIfMissing(currentTags, "no-people"));
+  }
+
+  async function handleGenerateCaption() {
+    if (!photo) {
+      return;
+    }
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    const didSave = await persistChanges();
+
+    if (!didSave) {
+      return;
+    }
+
+    setIsGeneratingCaption(true);
+    setError("");
+
+    try {
+      await generateCaption(photo.id);
+      const refreshedPhotoResponse = await getPhoto(photo.id);
+      const refreshedPhoto = refreshedPhotoResponse?.data;
+
+      if (!refreshedPhoto) {
+        throw new Error("Failed to refresh photo after caption generation");
+      }
+
+      setAiCaption(refreshedPhoto.ai_caption || "");
+      setAltText(refreshedPhoto.alt_text || "");
+      onSaved(refreshedPhoto);
+    } catch (captionError) {
+      setError(captionError.message || "Failed to generate AI caption");
+    } finally {
+      setIsGeneratingCaption(false);
+    }
   }
 
   if (!photo) {
@@ -350,13 +403,38 @@ export default function PhotoEditor({
           </label>
 
           <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Description</span>
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Notes for AI</span>
+            <span className="mb-2 block text-sm text-stone-500">
+              Private thoughts or context about the moment. This is for better caption generation, not public-facing copy.
+            </span>
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               className="field min-h-[120px] resize-y"
             />
           </label>
+
+          <section className="border-t border-stone-200 pt-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Caption</p>
+                <p className="mt-2 text-sm text-stone-500">
+                  Generate or regenerate this caption from the current photo metadata.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateCaption}
+                disabled={isSaving || isDeleting || isGeneratingCaption}
+                className="btn-secondary"
+              >
+                {isGeneratingCaption ? "Generating..." : aiCaption ? "Regenerate" : "Generate"}
+              </button>
+            </div>
+            <div className="mt-4 border border-stone-300 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+              {aiCaption || "No AI caption generated yet."}
+            </div>
+          </section>
 
           <label className="block">
             <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Alt Text</span>
@@ -378,7 +456,7 @@ export default function PhotoEditor({
             <PeopleSelector
               selectedIds={selectedPeopleIds}
               people={catalogPeople}
-              onChange={setSelectedPeopleIds}
+              onChange={handlePeopleChange}
               onPersonCreated={handlePersonCreated}
               onNoPeople={handleNoPeople}
             />

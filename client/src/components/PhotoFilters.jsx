@@ -7,7 +7,8 @@ const MISSING_FIELD_OPTIONS = [
   { id: "people", label: "People" },
   { id: "tags", label: "Tags" },
   { id: "title", label: "Title" },
-  { id: "alt_text", label: "Alt Text" }
+  { id: "alt_text", label: "Alt Text" },
+  { id: "ai_caption", label: "AI Caption" }
 ];
 
 function toggleValue(values, nextValue) {

@@ -89,6 +89,7 @@ const insertPhoto = db.prepare(`
     sha256_hash,
     width,
     height,
+    title,
     captured_at,
     date_source,
     latitude,
@@ -109,7 +110,7 @@ const insertPhoto = db.prepare(`
     thumbnail_url,
     small_url,
     large_url
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const selectPhotoById = db.prepare(`
@@ -177,6 +178,7 @@ async function processUpload(file) {
     EXTENSION_MIME_TYPES[originalExtension] ||
     "application/octet-stream";
   const fileHash = hashFile(file.buffer);
+  const derivedTitle = buildTitleFromFilename(file.originalname);
   const existingPhoto = findPhotoByHash.get(fileHash);
 
   if (existingPhoto) {
@@ -235,6 +237,7 @@ async function processUpload(file) {
       fileHash,
       processedImage.exif.width || null,
       processedImage.exif.height || null,
+      derivedTitle,
       extractedExif.dateTaken,
       extractedExif.dateTaken ? "exif" : "uploaded_at",
       extractedExif.gpsLat,
@@ -268,6 +271,15 @@ async function processUpload(file) {
     await cleanupUploadedFiles(Object.values(keys));
     throw error;
   }
+}
+
+function buildTitleFromFilename(originalFilename) {
+  const basename = path.basename(originalFilename, path.extname(originalFilename));
+
+  return basename
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function queueReverseGeocode(photoId, lat, lng) {

@@ -1,0 +1,261 @@
+const express = require("express");
+const { getDb, initializeDatabase } = require("../lib/db");
+
+const router = express.Router();
+
+initializeDatabase();
+
+router.post("/:id", async (req, res) => {
+  try {
+    const db = getDb();
+    const photoId = normalizeSingleId(req.params.id);
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      return res
+        .status(500)
+        .json({ error: "ANTHROPIC_API_KEY is not configured" });
+    }
+
+    const photo = db
+      .prepare(
+        `
+      SELECT *
+      FROM photos
+      WHERE id = ?
+        AND deleted_at IS NULL
+    `,
+      )
+      .get(photoId);
+
+    if (!photo) {
+      return res.status(404).json({ error: "Photo not found" });
+    }
+
+    if (!photo.large_url) {
+      return res
+        .status(400)
+        .json({ error: "Photo does not have a large image URL" });
+    }
+
+    const enrichedPhoto = attachPeopleAndTags(db, photo);
+    const imageBase64 = await fetchImageAsBase64(enrichedPhoto.large_url);
+    const prompt = buildCaptionPrompt(enrichedPhoto);
+    const anthropicResponse = await requestCaptionFromAnthropic(
+      apiKey,
+      imageBase64,
+      prompt,
+    );
+    const parsedResponse = parseAnthropicText(anthropicResponse);
+
+    if (!parsedResponse.aiCaption) {
+      throw new Error("Anthropic response did not include a caption");
+    }
+
+    const nextAltText =
+      enrichedPhoto.alt_text && String(enrichedPhoto.alt_text).trim()
+        ? enrichedPhoto.alt_text
+        : parsedResponse.altText;
+
+    db.prepare(
+      `
+      UPDATE photos
+      SET ai_caption = ?,
+          alt_text = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+    ).run(parsedResponse.aiCaption, nextAltText || null, photoId);
+
+    return res.json({
+      data: {
+        ai_caption: parsedResponse.aiCaption,
+        alt_text: nextAltText || null,
+      },
+    });
+  } catch (error) {
+    if (error.message === "Invalid photo id") {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res
+      .status(500)
+      .json({ error: error.message || "Failed to generate caption" });
+  }
+});
+
+async function fetchImageAsBase64(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer).toString("base64");
+}
+
+async function requestCaptionFromAnthropic(apiKey, imageBase64, prompt) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 300,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: imageBase64,
+              },
+            },
+            {
+              type: "text",
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const bodyText = await response.text();
+  let parsedBody = null;
+
+  if (bodyText) {
+    try {
+      parsedBody = JSON.parse(bodyText);
+    } catch {
+      throw new Error("Anthropic API returned invalid JSON");
+    }
+  }
+
+  if (!response.ok) {
+    const apiMessage = parsedBody?.error?.message || parsedBody?.message;
+    throw new Error(
+      apiMessage || `Anthropic API request failed: ${response.status}`,
+    );
+  }
+
+  return parsedBody;
+}
+
+function parseAnthropicText(response) {
+  const text = (response?.content || [])
+    .filter((block) => block.type === "text" && block.text)
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+
+  const aiCaptionMatch = text.match(
+    /AI_CAPTION:\s*([\s\S]*?)(?:\nALT_TEXT:|$)/i,
+  );
+  const altTextMatch = text.match(/ALT_TEXT:\s*([\s\S]*?)$/i);
+
+  return {
+    aiCaption: cleanGeneratedText(aiCaptionMatch ? aiCaptionMatch[1] : text),
+    altText: cleanGeneratedText(altTextMatch ? altTextMatch[1] : ""),
+  };
+}
+
+function cleanGeneratedText(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function buildCaptionPrompt(photo) {
+  const people = (photo.people || []).map((person) => person.name);
+  const tags = photo.tags || [];
+  const locationParts = [
+    photo.neighborhood,
+    photo.city,
+    photo.region,
+    photo.country,
+  ].filter(Boolean);
+  const cameraParts = [photo.camera_make, photo.camera_model].filter(Boolean);
+
+  return [
+    "You are writing captions for a personal family travel blog. Write exactly like a real person would — casual, specific, direct.",
+    "",
+    "Rules:",
+    "- 1-2 sentences max for the caption",
+    "- Mention people by name, location, and approximate time when available",
+    "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
+    "- Be specific, not generic. Avoid vague positive filler.",
+    "- Never end a sentence with a participial phrase like '...capturing a moment of...' or '...reflecting their...' or '...highlighting the...'",
+    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore",
+    "- Never use 'not just X, but Y' or 'more than just' constructions",
+    "- Do not list three things in a row for emphasis",
+    "- Do not editorialize about significance or meaning",
+    "- Never use em dashes (—). Use a comma, period, or rephrase the sentence instead. Em dashes are one of the strongest identifiers of AI-written text.",
+    "- Write like you were there, not like you are describing a photo",
+    "",
+    "Photo metadata:",
+    `People: ${people.length > 0 ? people.join(", ") : "None listed"}`,
+    `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
+    `Date taken: ${photo.captured_at || "Unknown"}`,
+    `Tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
+    `Title: ${photo.title || "Not set"}`,
+    `Private notes/context: ${photo.description || "Not set"}`,
+    "Use the private notes/context to understand the moment, but do not quote or paraphrase it too literally unless it naturally fits.",
+    "",
+    "Return exactly this format:",
+    "AI_CAPTION: <caption here>",
+    "ALT_TEXT: <alt text here>",
+  ].join("\n");
+}
+
+function attachPeopleAndTags(db, photo) {
+  const people = db
+    .prepare(
+      `
+    SELECT people.id, people.name
+    FROM photo_people
+    INNER JOIN people ON people.id = photo_people.person_id
+    WHERE photo_people.photo_id = ?
+    ORDER BY people.name
+  `,
+    )
+    .all(photo.id);
+  const tags = db
+    .prepare(
+      `
+    SELECT tags.name
+    FROM photo_tags
+    INNER JOIN tags ON tags.id = photo_tags.tag_id
+    WHERE photo_tags.photo_id = ?
+    ORDER BY tags.name
+  `,
+    )
+    .all(photo.id)
+    .map((row) => row.name);
+
+  return {
+    ...photo,
+    people,
+    tags,
+  };
+}
+
+function normalizeSingleId(value) {
+  const id = Number(value);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Invalid photo id");
+  }
+
+  return id;
+}
+
+module.exports = router;

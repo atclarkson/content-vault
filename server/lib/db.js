@@ -50,6 +50,10 @@ function ensurePhotoColumns(database) {
       sql: "ALTER TABLE photos ADD COLUMN alt_text TEXT"
     },
     {
+      name: "ai_caption",
+      sql: "ALTER TABLE photos ADD COLUMN ai_caption TEXT"
+    },
+    {
       name: "geo_status",
       sql: "ALTER TABLE photos ADD COLUMN geo_status TEXT NOT NULL DEFAULT 'skipped' CHECK (geo_status IN ('queued', 'complete', 'skipped', 'failed'))"
     },

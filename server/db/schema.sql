@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS photos (
   title TEXT,
   description TEXT,
   alt_text TEXT,
+  ai_caption TEXT,
   captured_at TEXT,
   date_source TEXT NOT NULL DEFAULT 'uploaded_at' CHECK (date_source IN ('exif', 'file_created', 'file_modified', 'uploaded_at', 'manual')),
   date_manually_edited INTEGER NOT NULL DEFAULT 0 CHECK (date_manually_edited IN (0, 1)),
