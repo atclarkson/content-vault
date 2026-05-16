@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS photo_people (
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  color TEXT,
+  group_id INTEGER REFERENCES tag_groups(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS photo_tags (
   PRIMARY KEY (photo_id, tag_id),
   FOREIGN KEY (photo_id) REFERENCES photos (id) ON DELETE CASCADE,
   FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tag_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  color TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS destinations (
@@ -153,6 +161,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE INDEX IF NOT EXISTS idx_photos_processing_status ON photos (processing_status);
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos (captured_at);
+CREATE INDEX IF NOT EXISTS idx_tag_groups_sort_order ON tag_groups (sort_order);
 CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start);
 CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published);
 CREATE INDEX IF NOT EXISTS idx_videos_date_filmed ON videos (date_filmed);
