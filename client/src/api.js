@@ -139,6 +139,10 @@ export async function getDestinations() {
   return request("/api/destinations");
 }
 
+export async function getJournalEntries() {
+  return request("/api/journal-entries");
+}
+
 export async function getVideos() {
   return request("/api/videos");
 }
@@ -213,6 +217,42 @@ export async function importDestinations(file) {
 
     xhr.onerror = () => {
       reject(new Error("Destination import failed"));
+    };
+
+    xhr.send(formData);
+  });
+}
+
+export async function importDayOne(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", "/api/import/day-one");
+    xhr.responseType = "text";
+
+    xhr.onload = () => {
+      let data = null;
+
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch (error) {
+        reject(new Error("Invalid JSON response"));
+        return;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+        return;
+      }
+
+      reject(new Error(data?.error || "Day One import failed"));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Day One import failed"));
     };
 
     xhr.send(formData);

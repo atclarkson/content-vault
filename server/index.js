@@ -24,6 +24,7 @@ app.use("/api/export", require("./routes/export"));
 app.use("/api/caption", require("./routes/caption"));
 app.use("/api/import/day-one", require("./routes/day-one"));
 app.use("/api/destinations", require("./routes/destinations"));
+app.use("/api/journal-entries", require("./routes/journal-entries"));
 app.use("/api/videos", require("./routes/videos"));
 app.use("/api/settings", require("./routes/settings"));
 app.use("/api/processing", require("./routes/processing"));

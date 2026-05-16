@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDestinations, getPhotos, getVideos, updatePhoto, uploadPhotos } from "../api";
+import {
+  getDestinations,
+  getJournalEntries,
+  getPhotos,
+  getVideos,
+  updatePhoto,
+  uploadPhotos
+} from "../api";
 import BulkActionBar from "./BulkActionBar";
 import PhotoEditor from "./PhotoEditor";
 import PhotoFilters from "./PhotoFilters";
@@ -9,7 +16,8 @@ import VideoEditor from "./VideoEditor";
 const CONTENT_TYPE_OPTIONS = [
   { id: "all", label: "All", disabled: false },
   { id: "photos", label: "Photos", disabled: false },
-  { id: "videos", label: "Videos", disabled: false }
+  { id: "videos", label: "Videos", disabled: false },
+  { id: "journal", label: "Journal", disabled: false }
 ];
 
 function formatMonthRange(dateStart, dateEnd) {
@@ -20,6 +28,24 @@ function formatMonthRange(dateStart, dateEnd) {
   });
 
   return `${formatter.format(new Date(dateStart))} – ${formatter.format(new Date(dateEnd))}`;
+}
+
+function formatJournalDate(value) {
+  if (!value) {
+    return "Unknown date";
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown date";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(parsed);
 }
 
 function formatVideoDuration(totalSeconds) {
@@ -51,6 +77,11 @@ function getVideoTimestamp(video) {
   const value = video.date_filmed || video.date_published || video.created_at;
   const timestamp = value ? new Date(value).getTime() : Number.NaN;
 
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getJournalTimestamp(entry) {
+  const timestamp = entry?.entry_date ? new Date(entry.entry_date).getTime() : Number.NaN;
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
@@ -103,6 +134,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [videos, setVideos] = useState([]);
+  const [journalEntries, setJournalEntries] = useState([]);
   const [filters, setFilters] = useState({});
   const [sortDirection, setSortDirection] = useState("newest");
   const [contentType, setContentType] = useState("all");
@@ -114,6 +146,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [activeDropZone, setActiveDropZone] = useState("");
   const [isUploadingToDestination, setIsUploadingToDestination] = useState(false);
+  const [expandedJournalEntryIds, setExpandedJournalEntryIds] = useState(new Set());
   const contentScrollRef = useRef(null);
 
   function syncLoadedPhotos(nextPhotos, { resetSelection = false } = {}) {
@@ -155,10 +188,11 @@ export default function TimelineView({ people, tags, tagGroups }) {
       setError("");
 
       try {
-        const [destinationsResponse, photosResponse, videosResponse] = await Promise.all([
+        const [destinationsResponse, photosResponse, videosResponse, journalEntriesResponse] = await Promise.all([
           getDestinations(),
           getPhotos(filters),
-          getVideos()
+          getVideos(),
+          getJournalEntries()
         ]);
 
         if (!isActive) {
@@ -168,6 +202,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
         setDestinations(destinationsResponse?.data || []);
         syncLoadedPhotos(photosResponse?.data || [], { resetSelection: true });
         syncLoadedVideos(videosResponse?.data || []);
+        setJournalEntries(journalEntriesResponse?.data || []);
       } catch (loadError) {
         if (!isActive) {
           return;
@@ -228,8 +263,10 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const groupedTimeline = useMemo(() => {
     const photosByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
     const videosByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
+    const journalEntriesByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
     const undatedPhotos = [];
     const undatedVideos = [];
+    const undatedJournalEntries = [];
     const brandedVideos = [];
 
     for (const photo of photos) {
@@ -264,6 +301,17 @@ export default function TimelineView({ people, tags, tagGroups }) {
       videosByDestinationId.get(matchingDestination.id).push(video);
     }
 
+    for (const journalEntry of journalEntries) {
+      const matchingDestination = findMatchingDestinationForJournalEntry(journalEntry, destinations);
+
+      if (!matchingDestination) {
+        undatedJournalEntries.push(journalEntry);
+        continue;
+      }
+
+      journalEntriesByDestinationId.get(matchingDestination.id).push(journalEntry);
+    }
+
     const destinationBlocks = [...destinations]
       .sort((left, right) => {
         const comparison = new Date(left.date_start).getTime() - new Date(right.date_start).getTime();
@@ -272,16 +320,18 @@ export default function TimelineView({ people, tags, tagGroups }) {
       .map((destination) => ({
         ...destination,
         photos: sortPhotosForDisplay(photosByDestinationId.get(destination.id) || [], sortDirection),
-        videos: sortVideosForDisplay(videosByDestinationId.get(destination.id) || [], sortDirection)
+        videos: sortVideosForDisplay(videosByDestinationId.get(destination.id) || [], sortDirection),
+        journalEntries: sortJournalEntriesForDisplay(journalEntriesByDestinationId.get(destination.id) || [], sortDirection)
       }));
 
     return {
       destinations: destinationBlocks,
       undatedPhotos: sortPhotosForDisplay(undatedPhotos, sortDirection),
       undatedVideos: sortVideosForDisplay(undatedVideos, sortDirection),
+      undatedJournalEntries: sortJournalEntriesForDisplay(undatedJournalEntries, sortDirection),
       brandedVideos: sortVideosForDisplay(brandedVideos, sortDirection)
     };
-  }, [destinations, photos, videos, sortDirection]);
+  }, [destinations, journalEntries, photos, videos, sortDirection]);
 
   const activeMissingFilters = useMemo(() => parseCsvList(filters.missing), [filters.missing]);
   const showNoContentDestinations = activeMissingFilters.includes("no_content");
@@ -292,7 +342,9 @@ export default function TimelineView({ people, tags, tagGroups }) {
     }
 
     return groupedTimeline.destinations.filter((destination) => (
-      destination.photos.length === 0 && destination.videos.length === 0
+      destination.photos.length === 0
+      && destination.videos.length === 0
+      && destination.journalEntries.length === 0
     ));
   }, [groupedTimeline.destinations, showNoContentDestinations]);
 
@@ -551,6 +603,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
             <div className="text-center">
               <p className="text-sm font-medium text-stone-700">Loading timeline...</p>
               <p className="mt-2 text-sm text-stone-500">Fetching destinations, photos, and videos.</p>
+              <p className="mt-1 text-sm text-stone-500">Loading journal entries too.</p>
             </div>
           </section>
         ) : hasActiveFilters && !showNoContentDestinations ? (
@@ -568,9 +621,11 @@ export default function TimelineView({ people, tags, tagGroups }) {
               </button>
             </div>
 
-            {contentType === "videos" ? (
+            {contentType === "videos" || contentType === "journal" ? (
               <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
-                Video results do not use the photo filters.
+                {contentType === "videos"
+                  ? "Video results do not use the photo filters."
+                  : "Journal results do not use the photo filters."}
               </div>
             ) : (
               <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -592,9 +647,13 @@ export default function TimelineView({ people, tags, tagGroups }) {
           <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-8 pb-4">
               {displayedDestinations.map((destination) => {
-                const visiblePhotos = contentType === "videos" ? [] : destination.photos;
-                const visibleVideos = contentType === "photos" ? [] : destination.videos;
-                const hasVisibleContent = visiblePhotos.length > 0 || visibleVideos.length > 0;
+                const visiblePhotos = contentType === "videos" || contentType === "journal" ? [] : destination.photos;
+                const visibleVideos = contentType === "photos" || contentType === "journal" ? [] : destination.videos;
+                const visibleJournalEntries = contentType === "photos" || contentType === "videos"
+                  ? []
+                  : destination.journalEntries;
+                const hasVisibleContent =
+                  visiblePhotos.length > 0 || visibleVideos.length > 0 || visibleJournalEntries.length > 0;
 
                 return (
                   <section key={destination.id} className="border border-stone-300 bg-white">
@@ -612,6 +671,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
                             {destination.photos.length} photo{destination.photos.length === 1 ? "" : "s"}
                             {" · "}
                             {destination.videos.length} video{destination.videos.length === 1 ? "" : "s"}
+                            {" · "}
+                            {destination.journalEntries.length} journal entr{destination.journalEntries.length === 1 ? "y" : "ies"}
                           </p>
                         </div>
                       </div>
@@ -642,7 +703,27 @@ export default function TimelineView({ people, tags, tagGroups }) {
                         />
                       ) : null}
 
-                      {!hasVisibleContent && contentType !== "videos" ? (
+                      {visibleJournalEntries.length > 0 ? (
+                        <JournalEntryList
+                          entries={visibleJournalEntries}
+                          expandedIds={expandedJournalEntryIds}
+                          onToggleExpand={(entryId) => {
+                            setExpandedJournalEntryIds((currentValue) => {
+                              const nextValue = new Set(currentValue);
+
+                              if (nextValue.has(entryId)) {
+                                nextValue.delete(entryId);
+                              } else {
+                                nextValue.add(entryId);
+                              }
+
+                              return nextValue;
+                            });
+                          }}
+                        />
+                      ) : null}
+
+                      {!hasVisibleContent && contentType !== "videos" && contentType !== "journal" ? (
                         <DestinationDropZone
                           destination={destination}
                           isActive={activeDropZone === destination.id}
@@ -661,7 +742,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
                 );
               })}
 
-              {contentType !== "photos" && groupedTimeline.brandedVideos.length > 0 ? (
+              {contentType !== "photos" && contentType !== "journal" && groupedTimeline.brandedVideos.length > 0 ? (
                 <section className="border border-stone-300 bg-white">
                   <div className="border-b border-stone-200 px-5 py-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Brand & Sponsored Content</p>
@@ -692,11 +773,13 @@ export default function TimelineView({ people, tags, tagGroups }) {
                       {groupedTimeline.undatedPhotos.length} photo{groupedTimeline.undatedPhotos.length === 1 ? "" : "s"}
                       {" · "}
                       {groupedTimeline.undatedVideos.length} video{groupedTimeline.undatedVideos.length === 1 ? "" : "s"}
+                      {" · "}
+                      {groupedTimeline.undatedJournalEntries.length} journal entr{groupedTimeline.undatedJournalEntries.length === 1 ? "y" : "ies"}
                     </p>
                   </div>
 
                   <div className="space-y-5 px-5 py-5">
-                    {contentType !== "videos" && groupedTimeline.undatedPhotos.length > 0 ? (
+                    {contentType !== "videos" && contentType !== "journal" && groupedTimeline.undatedPhotos.length > 0 ? (
                       <PhotoGrid
                         photos={groupedTimeline.undatedPhotos}
                         onPhotoClick={(photo) => {
@@ -710,7 +793,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
                       />
                     ) : null}
 
-                    {contentType !== "photos" && groupedTimeline.undatedVideos.length > 0 ? (
+                    {contentType !== "photos" && contentType !== "journal" && groupedTimeline.undatedVideos.length > 0 ? (
                       <VideoGrid
                         videos={groupedTimeline.undatedVideos}
                         onVideoClick={(video) => {
@@ -720,11 +803,33 @@ export default function TimelineView({ people, tags, tagGroups }) {
                       />
                     ) : null}
 
+                    {contentType !== "photos" && contentType !== "videos" && groupedTimeline.undatedJournalEntries.length > 0 ? (
+                      <JournalEntryList
+                        entries={groupedTimeline.undatedJournalEntries}
+                        expandedIds={expandedJournalEntryIds}
+                        onToggleExpand={(entryId) => {
+                          setExpandedJournalEntryIds((currentValue) => {
+                            const nextValue = new Set(currentValue);
+
+                            if (nextValue.has(entryId)) {
+                              nextValue.delete(entryId);
+                            } else {
+                              nextValue.add(entryId);
+                            }
+
+                            return nextValue;
+                          });
+                        }}
+                      />
+                    ) : null}
+
                     {(contentType === "videos" && groupedTimeline.undatedVideos.length === 0)
                     || (contentType === "photos" && groupedTimeline.undatedPhotos.length === 0)
+                    || (contentType === "journal" && groupedTimeline.undatedJournalEntries.length === 0)
                     || (contentType === "all"
                       && groupedTimeline.undatedPhotos.length === 0
-                      && groupedTimeline.undatedVideos.length === 0) ? (
+                      && groupedTimeline.undatedVideos.length === 0
+                      && groupedTimeline.undatedJournalEntries.length === 0) ? (
                         <p className="text-sm text-stone-500">No undated content.</p>
                       ) : null}
                   </div>
@@ -881,6 +986,61 @@ function VideoGrid({ videos, onVideoClick }) {
   );
 }
 
+function JournalEntryList({ entries, expandedIds, onToggleExpand }) {
+  return (
+    <div className="space-y-3">
+      {entries.map((entry) => {
+        const isExpanded = expandedIds.has(entry.id);
+        const hasBody = Boolean(String(entry.text || "").trim());
+        const metaLine = [
+          entry.city || null,
+          entry.weather_description || entry.weather_conditions || null,
+          entry.temperature_celsius !== null && entry.temperature_celsius !== undefined
+            ? `${Math.round(Number(entry.temperature_celsius))}°C`
+            : null
+        ].filter(Boolean).join(" · ");
+
+        return (
+          <article key={entry.id} className="border border-stone-300 bg-stone-50 px-4 py-4">
+            <div className="flex items-start gap-3">
+              <div className="text-xl leading-none">📓</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h3 className="text-base font-semibold text-stone-900">
+                    {entry.title || "Untitled journal entry"}
+                  </h3>
+                  <p className="text-sm text-stone-500">{formatJournalDate(entry.entry_date)}</p>
+                </div>
+
+                {metaLine ? (
+                  <p className="mt-1 text-sm text-stone-500">{metaLine}</p>
+                ) : null}
+
+                {hasBody ? (
+                  <div className="mt-3">
+                    <p className={`whitespace-pre-wrap text-sm leading-6 text-stone-700 ${isExpanded ? "" : "line-clamp-3"}`}>
+                      {entry.text}
+                    </p>
+                    {entry.text.length > 160 ? (
+                      <button
+                        type="button"
+                        onClick={() => onToggleExpand(entry.id)}
+                        className="mt-2 text-sm font-medium text-stone-700 underline underline-offset-2"
+                      >
+                        {isExpanded ? "Read less" : "Read more"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function buildUniqueLocationOptions(items, field) {
   return [...new Set(
     items
@@ -937,6 +1097,39 @@ function findMatchingDestinationForVideo(video, destinations) {
   }
 
   return null;
+}
+
+function findMatchingDestinationForJournalEntry(entry, destinations) {
+  const timestamp = getJournalTimestamp(entry);
+
+  if (timestamp === null) {
+    return null;
+  }
+
+  const dateMatches = destinations.filter((destination) => isWithinDateRange(timestamp, destination));
+
+  if (dateMatches.length > 0) {
+    return sortDestinationsByContainedThenStart(dateMatches, timestamp)[0];
+  }
+
+  return null;
+}
+
+function sortJournalEntriesForDisplay(entries, sortDirection) {
+  const sorted = [...entries];
+
+  sorted.sort((left, right) => {
+    const leftTime = getJournalTimestamp(left) ?? 0;
+    const rightTime = getJournalTimestamp(right) ?? 0;
+
+    if (sortDirection === "oldest") {
+      return leftTime - rightTime || left.id - right.id;
+    }
+
+    return rightTime - leftTime || right.id - left.id;
+  });
+
+  return sorted;
 }
 
 function getTimestamp(value) {

@@ -107,20 +107,33 @@ router.post("/", upload.single("file"), async (req, res) => {
     const journal = JSON.parse((await journalEntry.buffer()).toString("utf8"));
     const journalRows = getJournalRows(journal);
     const photoFileMap = buildPhotoFileMap(zipEntries);
+    const totalEntries = journalRows.length;
+
+    beginSse(res);
+    writeSse(res, {
+      type: "start",
+      total: totalEntries,
+    });
 
     let matchedPhotos = 0;
     let uploadedPhotos = 0;
     let textEntriesAdded = 0;
     let skippedDuplicates = 0;
+    let currentEntry = 0;
 
     for (const entry of journalRows) {
+      currentEntry += 1;
       const entryUuid = normalizeString(entry.uuid);
       const cleanedText = cleanJournalText(entry.text || "");
       const { title: entryTitle, text: entryBody } = splitJournalText(cleanedText);
       const entryLocation = extractLocation(entry.location);
       const entryPhotos = Array.isArray(entry.photos) ? entry.photos : [];
+      let entryAction = "skipped";
 
       if (entryPhotos.length > 0) {
+        let entryMatchedCount = 0;
+        let entryUploadedCount = 0;
+
         for (const photo of entryPhotos) {
           const photoMd5 = normalizeMd5(photo.md5);
           const photoDate = normalizeIsoDate(getPhotoDate(photo, entry));
@@ -155,6 +168,7 @@ router.post("/", upload.single("file"), async (req, res) => {
               photoLocation,
             );
             matchedPhotos += 1;
+            entryMatchedCount += 1;
             continue;
           }
 
@@ -191,20 +205,46 @@ router.post("/", upload.single("file"), async (req, res) => {
 
           if (importResult.skipped) {
             matchedPhotos += 1;
+            entryMatchedCount += 1;
           } else {
             uploadedPhotos += 1;
+            entryUploadedCount += 1;
           }
         }
 
+        if (entryUploadedCount > 0) {
+          entryAction = "uploaded";
+        } else if (entryMatchedCount > 0) {
+          entryAction = "matched";
+        }
+
+        writeSse(res, {
+          type: "progress",
+          current: currentEntry,
+          total: totalEntries,
+          action: entryAction,
+        });
         continue;
       }
 
       if (!entryUuid) {
+        writeSse(res, {
+          type: "progress",
+          current: currentEntry,
+          total: totalEntries,
+          action: entryAction,
+        });
         continue;
       }
 
       if (selectJournalEntryByUuid.get(entryUuid)) {
         skippedDuplicates += 1;
+        writeSse(res, {
+          type: "progress",
+          current: currentEntry,
+          total: totalEntries,
+          action: entryAction,
+        });
         continue;
       }
 
@@ -228,17 +268,33 @@ router.post("/", upload.single("file"), async (req, res) => {
         weather.humidity,
       );
       textEntriesAdded += 1;
+      entryAction = "journal";
+
+      writeSse(res, {
+        type: "progress",
+        current: currentEntry,
+        total: totalEntries,
+        action: entryAction,
+      });
     }
 
-    return res.json({
-      data: {
-        matched_photos: matchedPhotos,
-        uploaded_photos: uploadedPhotos,
-        text_entries_added: textEntriesAdded,
-        skipped_duplicates: skippedDuplicates,
-      },
+    writeSse(res, {
+      type: "complete",
+      matched_photos: matchedPhotos,
+      uploaded_photos: uploadedPhotos,
+      text_entries_added: textEntriesAdded,
+      skipped_duplicates: skippedDuplicates,
     });
+    return res.end();
   } catch (error) {
+    if (res.headersSent) {
+      writeSse(res, {
+        type: "error",
+        error: error.message,
+      });
+      return res.end();
+    }
+
     return res.status(500).json({ error: error.message });
   }
 });
@@ -265,6 +321,20 @@ function getJournalRows(journal) {
   }
 
   return [];
+}
+
+function beginSse(res) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+}
+
+function writeSse(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function buildPhotoFileMap(zipEntries) {
