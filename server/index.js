@@ -19,6 +19,7 @@ app.use("/api/photos", require("./routes/photos"));
 app.use("/api/upload", require("./routes/upload"));
 app.use("/api/people", require("./routes/people"));
 app.use("/api/tags", require("./routes/tags"));
+app.use("/api/tag-groups", require("./routes/tag-groups"));
 app.use("/api/export", require("./routes/export"));
 app.use("/api/caption", require("./routes/caption"));
 app.use("/api/destinations", require("./routes/destinations"));

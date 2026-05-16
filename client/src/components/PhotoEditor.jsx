@@ -4,6 +4,19 @@ import LocationAutocompleteInput from "./LocationAutocompleteInput";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
 
+const TAG_GROUP_COLOR_CLASSES = [
+  "bg-red-500",
+  "bg-orange-500",
+  "bg-yellow-400",
+  "bg-green-500",
+  "bg-blue-500",
+  "bg-purple-500",
+  "bg-pink-500",
+  "bg-gray-300",
+  "bg-gray-600",
+  "bg-[oklch(54.7%_0.021_43.1)]"
+];
+
 function formatDateForInput(value) {
   if (!value) {
     return "";
@@ -63,10 +76,19 @@ function removeTagIfPresent(currentTags, targetTag) {
   return currentTags.filter((tag) => tag !== targetTag);
 }
 
+function getGroupColorClass(color) {
+  return TAG_GROUP_COLOR_CLASSES.includes(color) ? color : "bg-stone-400";
+}
+
+function normalizeTagKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 export default function PhotoEditor({
   photo,
   people,
   tags,
+  tagGroups,
   locationOptions,
   onClose,
   onSaved,
@@ -144,6 +166,27 @@ export default function PhotoEditor({
   }, [people]);
 
   const showExifSection = useMemo(() => (photo ? hasExifData(photo) : false), [photo]);
+  const suggestedTagRecords = useMemo(() => {
+    if (!aiSuggestions?.tags || aiSuggestions.tags.length === 0) {
+      return [];
+    }
+
+    const tagByKey = new Map(
+      tags.map((entry) => [normalizeTagKey(entry.name), entry])
+    );
+    const appliedTagSet = new Set(tagNames.map((tag) => normalizeTagKey(tag)));
+
+    return aiSuggestions.tags
+      .filter((tag) => !appliedTagSet.has(normalizeTagKey(tag)))
+      .map((tag) => {
+        const tagRecord = tagByKey.get(normalizeTagKey(tag));
+
+        return {
+          name: tagRecord?.name || tag,
+          groupColor: tagRecord?.group_color || null
+        };
+      });
+  }, [aiSuggestions?.tags, tagNames, tags]);
   const currentPayload = useMemo(() => buildPayload({
     title,
     description,
@@ -385,10 +428,14 @@ export default function PhotoEditor({
   }
 
   function handleAcceptSuggestedTag(tag) {
-    setTagNames((currentTags) => addTagIfMissing(currentTags, tag));
+    const normalizedTagKey = normalizeTagKey(tag);
+    const existingTag = tags.find((entry) => normalizeTagKey(entry.name) === normalizedTagKey);
+    const nextTagName = existingTag?.name || tag;
+
+    setTagNames((currentTags) => addTagIfMissing(currentTags, nextTagName));
     setAiSuggestions((currentValue) => currentValue ? {
       ...currentValue,
-      tags: currentValue.tags.filter((currentTag) => currentTag !== tag)
+      tags: currentValue.tags.filter((currentTag) => normalizeTagKey(currentTag) !== normalizedTagKey)
     } : currentValue);
   }
 
@@ -529,7 +576,7 @@ export default function PhotoEditor({
 
           <section>
             <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
-            <TagInput tags={tagNames} allTags={tags} onChange={setTagNames} />
+            <TagInput tags={tagNames} allTags={tags} tagGroups={tagGroups} onChange={setTagNames} />
           </section>
 
           <section className="border-t border-stone-200 pt-5">
@@ -724,16 +771,17 @@ export default function PhotoEditor({
 
                   <section>
                     <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
-                    {aiSuggestions.tags.length > 0 ? (
+                    {suggestedTagRecords.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {aiSuggestions.tags.map((tag) => (
+                        {suggestedTagRecords.map((tag) => (
                           <button
-                            key={tag}
+                            key={tag.name}
                             type="button"
-                            onClick={() => handleAcceptSuggestedTag(tag)}
-                            className="rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:border-amber-400 hover:bg-amber-50"
+                            onClick={() => handleAcceptSuggestedTag(tag.name)}
+                            className="inline-flex items-center gap-2 rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:border-amber-400 hover:bg-amber-50"
                           >
-                            {tag}
+                            <span className={`h-2.5 w-2.5 rounded-full border border-stone-400 ${getGroupColorClass(tag.groupColor)}`} />
+                            <span>{tag.name}</span>
                           </button>
                         ))}
                       </div>

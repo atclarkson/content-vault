@@ -114,6 +114,17 @@ export async function getTags(sort) {
   return request(`/api/tags${query}`);
 }
 
+export async function getTagGroups() {
+  return request("/api/tag-groups");
+}
+
+export async function mergeTags(sourceId, targetId) {
+  return jsonRequest("/api/tags/merge", "POST", {
+    source_id: sourceId,
+    target_id: targetId
+  });
+}
+
 export async function updateTag(id, data) {
   return jsonRequest(`/api/tags/${id}`, "PUT", data);
 }

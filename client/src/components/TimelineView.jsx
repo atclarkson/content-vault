@@ -99,7 +99,7 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
-export default function TimelineView({ people, tags }) {
+export default function TimelineView({ people, tags, tagGroups }) {
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -756,6 +756,7 @@ export default function TimelineView({ people, tags }) {
             video={editingVideo}
             people={people}
             tags={tags}
+            tagGroups={tagGroups}
             onClose={() => setEditingVideo(null)}
             onSaved={handleSavedVideo}
             onDeleted={handleDeletedVideo}
@@ -765,6 +766,7 @@ export default function TimelineView({ people, tags }) {
             photo={editingPhoto}
             people={people}
             tags={tags}
+            tagGroups={tagGroups}
             locationOptions={locationOptions}
             onClose={() => setEditingPhoto(null)}
             onSaved={handleSavedPhoto}

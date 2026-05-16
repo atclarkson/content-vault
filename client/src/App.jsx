@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getPeople, getTags } from "./api";
+import { getPeople, getTagGroups, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
 import PeopleView from "./components/PeopleView";
@@ -19,6 +19,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState("photos");
   const [people, setPeople] = useState([]);
   const [tags, setTags] = useState([]);
+  const [tagGroups, setTagGroups] = useState([]);
   const [error, setError] = useState("");
 
   async function refreshPeople() {
@@ -31,6 +32,11 @@ export default function App() {
     setTags(tagsResponse?.data || []);
   }
 
+  async function refreshTagGroups() {
+    const tagGroupsResponse = await getTagGroups();
+    setTagGroups(tagGroupsResponse?.data || []);
+  }
+
   useEffect(() => {
     let isActive = true;
 
@@ -38,7 +44,11 @@ export default function App() {
       setError("");
 
       try {
-        const [peopleResponse, tagsResponse] = await Promise.all([getPeople(), getTags()]);
+        const [peopleResponse, tagsResponse, tagGroupsResponse] = await Promise.all([
+          getPeople(),
+          getTags(),
+          getTagGroups()
+        ]);
 
         if (!isActive) {
           return;
@@ -46,6 +56,7 @@ export default function App() {
 
         setPeople(peopleResponse?.data || []);
         setTags(tagsResponse?.data || []);
+        setTagGroups(tagGroupsResponse?.data || []);
       } catch (loadError) {
         if (!isActive) {
           return;
@@ -83,11 +94,15 @@ export default function App() {
           ) : null}
 
           {currentView === "photos" ? (
-            <TimelineView people={people} tags={tags} />
+            <TimelineView people={people} tags={tags} tagGroups={tagGroups} />
           ) : currentView === "people" ? (
             <PeopleView people={people} refreshPeople={refreshPeople} />
           ) : currentView === "tags" ? (
-            <TagsView tags={tags} refreshTags={refreshTags} />
+            <TagsView
+              tagGroups={tagGroups}
+              refreshTags={refreshTags}
+              refreshTagGroups={refreshTagGroups}
+            />
           ) : currentView === "upload" ? (
             <UploadView onNavigate={setCurrentView} />
           ) : (

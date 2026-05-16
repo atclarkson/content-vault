@@ -438,7 +438,11 @@ function normalizeTagNames(values) {
   }
 
   return [
-    ...new Set(values.map((value) => String(value).trim()).filter(Boolean)),
+    ...new Set(
+      values
+        .map((value) => String(value).trim().toLowerCase())
+        .filter(Boolean),
+    ),
   ];
 }
 
@@ -570,14 +574,20 @@ function ensureTagsExist(db, tagNames) {
     return [];
   }
 
-  const insert = db.prepare(`
-    INSERT INTO tags (name)
-    VALUES (?)
-    ON CONFLICT(name) DO NOTHING
-  `);
-
   for (const tagName of tagNames) {
-    insert.run(tagName);
+    const existingTag = db.prepare(`
+      SELECT id
+      FROM tags
+      WHERE LOWER(name) = LOWER(?)
+      LIMIT 1
+    `).get(tagName);
+
+    if (!existingTag) {
+      db.prepare(`
+        INSERT INTO tags (name)
+        VALUES (?)
+      `).run(tagName);
+    }
   }
 
   return findTagIdsByNames(db, tagNames);
@@ -594,14 +604,16 @@ function findTagIdsByNames(db, tagNames) {
       `
     SELECT id, name
     FROM tags
-    WHERE name IN (${placeholders})
+    WHERE LOWER(name) IN (${placeholders})
   `,
     )
     .all(...tagNames);
-  const idByName = new Map(rows.map((row) => [row.name, row.id]));
+  const idByName = new Map(
+    rows.map((row) => [String(row.name).toLowerCase(), row.id]),
+  );
 
   return tagNames
-    .map((tagName) => idByName.get(tagName))
+    .map((tagName) => idByName.get(String(tagName).toLowerCase()))
     .filter((tagId) => Number.isInteger(tagId));
 }
 

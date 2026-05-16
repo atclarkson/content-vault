@@ -119,8 +119,9 @@ router.post("/:id", async (req, res) => {
     }
 
     const enrichedPhoto = attachPeopleAndTags(db, photo);
+    const tagTaxonomy = loadTagTaxonomy(db);
     const imageBase64 = await fetchImageAsBase64(enrichedPhoto.large_url);
-    const prompt = buildCaptionPrompt(enrichedPhoto);
+    const prompt = buildCaptionPrompt(enrichedPhoto, tagTaxonomy);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
       imageBase64,
@@ -262,7 +263,7 @@ function parseSuggestedTags(value) {
   )];
 }
 
-function buildCaptionPrompt(photo) {
+function buildCaptionPrompt(photo, tagTaxonomy) {
   const people = (photo.people || []).map((person) => person.name);
   const tags = photo.tags || [];
   const locationParts = [
@@ -279,8 +280,11 @@ function buildCaptionPrompt(photo) {
     "Rules:",
     "- 1-2 sentences max for the caption",
     "- Suggest a short, natural title, 4-10 words, not a filename",
-    "- Suggest 3-8 useful tags, lowercase, short, comma-separated, no hashtags",
+    "- Suggest 3-6 useful tags, lowercase, short, comma-separated, no hashtags",
     "- Always include one tag describing the shot itself when it can be inferred from the image, for example: overhead shot, wide shot, close up shot, portrait shot, detail shot, street shot",
+    "- Use the tag taxonomy below as a guide when suggesting tags",
+    "- Do not suggest country names or broad place names like china, japan, vietnam, portugal, hong kong, or similar. Location is handled separately.",
+    "- Do not suggest year, month, season, or time tags like fall 2025, winter 2026, summer, spring, or similar. The photo date is already stored separately.",
     "- Mention people by name, location, and approximate time when available",
     "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
     "- Be specific, not generic. Avoid vague positive filler.",
@@ -301,12 +305,45 @@ function buildCaptionPrompt(photo) {
     `Private notes/context: ${photo.description || "Not set"}`,
     "Use the private notes/context to understand the moment, but do not quote or paraphrase it too literally unless it naturally fits.",
     "",
+    "Tag taxonomy — when suggesting tags use these groups and example tags as a guide:",
+    tagTaxonomy,
+    "",
     "Return exactly this format:",
     "AI_CAPTION: <caption here>",
     "TAG_SUGGESTIONS: <comma-separated tags here>",
     "ALT_TEXT: <alt text here>",
     "TITLE_SUGGESTION: <suggested title here>",
   ].join("\n");
+}
+
+function loadTagTaxonomy(db) {
+  const groups = db.prepare(`
+    SELECT id, name, color, sort_order
+    FROM tag_groups
+    ORDER BY sort_order ASC, LOWER(name) ASC
+  `).all();
+  const tags = db.prepare(`
+    SELECT id, name, group_id
+    FROM tags
+    WHERE group_id IS NOT NULL
+    ORDER BY LOWER(name) ASC
+  `).all();
+  const tagsByGroupId = new Map();
+
+  for (const tag of tags) {
+    if (!tagsByGroupId.has(tag.group_id)) {
+      tagsByGroupId.set(tag.group_id, []);
+    }
+
+    tagsByGroupId.get(tag.group_id).push(tag.name);
+  }
+
+  const lines = groups.map((group) => {
+    const groupTags = tagsByGroupId.get(group.id) || [];
+    return `${group.name}: ${groupTags.length > 0 ? groupTags.join(", ") : "No tags yet"}`;
+  });
+
+  return lines.length > 0 ? lines.join("\n") : "No tag groups configured yet.";
 }
 
 function buildVideoCaptionPrompt(video) {

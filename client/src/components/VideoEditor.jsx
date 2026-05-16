@@ -69,6 +69,7 @@ export default function VideoEditor({
   video,
   people,
   tags,
+  tagGroups,
   onClose,
   onSaved,
   onDeleted
@@ -624,7 +625,7 @@ export default function VideoEditor({
 
           <section>
             <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
-            <TagInput tags={tagNames} allTags={tags} onChange={setTagNames} />
+            <TagInput tags={tagNames} allTags={tags} tagGroups={tagGroups} onChange={setTagNames} />
           </section>
 
           <label className="block">

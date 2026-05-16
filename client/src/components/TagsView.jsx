@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deleteTag, getPhotos, getTags, getVideos, updateTag } from "../api";
+import { deleteTag, getTagGroups, mergeTags, updateTag } from "../api";
 
-const COLOR_OPTIONS = [
+const TAG_GROUP_COLOR_CLASSES = [
   "bg-red-500",
   "bg-orange-500",
   "bg-yellow-400",
@@ -10,43 +10,90 @@ const COLOR_OPTIONS = [
   "bg-purple-500",
   "bg-pink-500",
   "bg-gray-300",
-  "bg-gray-600"
+  "bg-gray-600",
+  "bg-[oklch(54.7%_0.021_43.1)]"
 ];
 
-export default function TagsView({ tags: initialTags, refreshTags }) {
+function getGroupColorClass(color) {
+  return TAG_GROUP_COLOR_CLASSES.includes(color) ? color : "bg-stone-400";
+}
+
+export default function TagsView({ tagGroups: initialTagGroups, refreshTags, refreshTagGroups }) {
   const [sort, setSort] = useState("name");
-  const [tags, setTags] = useState(initialTags || []);
+  const [tagGroups, setTagGroups] = useState(initialTagGroups || []);
   const [expandedTagId, setExpandedTagId] = useState(null);
+  const [collapsedGroups, setCollapsedGroups] = useState({});
   const [isLoading, setIsLoading] = useState(true);
+  const [isMerging, setIsMerging] = useState(false);
+  const [showMergeUi, setShowMergeUi] = useState(false);
+  const [mergeSourceId, setMergeSourceId] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (sort === "name") {
-      setTags(initialTags || []);
-    }
-  }, [initialTags, sort]);
+    setTagGroups(initialTagGroups || []);
+    setIsLoading(false);
 
-  async function loadTags(nextSort = sort) {
-    setIsLoading(true);
+    setCollapsedGroups((currentValue) => {
+      const nextValue = { ...currentValue };
+
+      for (const group of initialTagGroups || []) {
+        if (!Object.prototype.hasOwnProperty.call(nextValue, group.id)) {
+          nextValue[group.id] = true;
+        }
+      }
+
+      return nextValue;
+    });
+  }, [initialTagGroups]);
+
+  const groupsWithTags = useMemo(() => {
+    return (tagGroups || []).map((group) => ({
+      ...group,
+      tags: [...(group.tags || [])].sort((left, right) => {
+        if (sort === "count") {
+          const leftCount = Number(left.photo_count || 0) + Number(left.video_count || 0);
+          const rightCount = Number(right.photo_count || 0) + Number(right.video_count || 0);
+          return rightCount - leftCount || left.name.localeCompare(right.name);
+        }
+
+        return left.name.localeCompare(right.name);
+      })
+    }));
+  }, [sort, tagGroups]);
+
+  const allTags = useMemo(() => groupsWithTags.flatMap((group) => group.tags), [groupsWithTags]);
+
+  async function refreshAllTagData() {
+    setError("");
+    const [tagGroupsResponse] = await Promise.all([
+      getTagGroups(),
+      refreshTags(),
+      refreshTagGroups()
+    ]);
+    setTagGroups(tagGroupsResponse?.data || []);
+  }
+
+  async function handleMerge() {
+    if (!mergeSourceId || !mergeTargetId) {
+      return;
+    }
+
+    setIsMerging(true);
     setError("");
 
     try {
-      const response = await getTags(nextSort);
-      setTags(response?.data || []);
-    } catch (loadError) {
-      setError(loadError.message || "Failed to load tags");
+      await mergeTags(Number(mergeSourceId), Number(mergeTargetId));
+      await refreshAllTagData();
+      setMergeSourceId("");
+      setMergeTargetId("");
+      setShowMergeUi(false);
+      setExpandedTagId(null);
+    } catch (mergeError) {
+      setError(mergeError.message || "Failed to merge tags");
     } finally {
-      setIsLoading(false);
+      setIsMerging(false);
     }
-  }
-
-  useEffect(() => {
-    loadTags(sort);
-  }, [sort]);
-
-  async function handleRefreshTags() {
-    await refreshTags();
-    await loadTags(sort);
   }
 
   return (
@@ -60,33 +107,109 @@ export default function TagsView({ tags: initialTags, refreshTags }) {
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setSort("name")} className={sort === "name" ? "btn-primary" : "btn-secondary"}>
             A-Z
           </button>
           <button type="button" onClick={() => setSort("count")} className={sort === "count" ? "btn-primary" : "btn-secondary"}>
             Most Used
           </button>
+          <button type="button" onClick={() => setShowMergeUi((currentValue) => !currentValue)} className="btn-secondary">
+            Merge Tags
+          </button>
         </div>
       </div>
+
+      {showMergeUi ? (
+        <div className="mb-4 border border-stone-300 bg-white px-5 py-4">
+          <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Source Tag</span>
+              <select value={mergeSourceId} onChange={(event) => setMergeSourceId(event.target.value)} className="field">
+                <option value="">Select source tag</option>
+                {allTags.map((tag) => (
+                  <option key={tag.id} value={tag.id}>{tag.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Target Tag</span>
+              <select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} className="field">
+                <option value="">Select target tag</option>
+                {allTags
+                  .filter((tag) => String(tag.id) !== String(mergeSourceId))
+                  .map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                  ))}
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleMerge}
+                disabled={isMerging || !mergeSourceId || !mergeTargetId}
+                className="btn-primary w-full"
+              >
+                {isMerging ? "Merging..." : "Confirm Merge"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {error ? <div className="mb-4 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading ? (
-          <div className="text-sm text-stone-500">Loading tags...</div>
+          <div className="text-sm text-stone-500">Loading tag groups...</div>
+        ) : groupsWithTags.length === 0 ? (
+          <div className="text-sm text-stone-500">No tag groups yet.</div>
         ) : (
-          <div className="divide-y divide-stone-200 border border-stone-300 bg-white">
-            {tags.map((tag) => (
-              <TagRow
-                key={tag.id}
-                tag={tag}
-                refreshTags={handleRefreshTags}
-                isExpanded={expandedTagId === tag.id}
-                onExpand={setExpandedTagId}
-                onCollapse={() => setExpandedTagId((currentId) => (currentId === tag.id ? null : currentId))}
-              />
-            ))}
+          <div className="space-y-5">
+            {groupsWithTags.map((group) => {
+              const isCollapsed = Boolean(collapsedGroups[group.id]);
+
+              return (
+                <section key={group.id} className="border border-stone-300 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedGroups((currentValue) => ({
+                      ...currentValue,
+                      [group.id]: !currentValue[group.id]
+                    }))}
+                    className="flex w-full items-center justify-between gap-4 border-l-4 px-5 py-4 text-left"
+                    style={{ borderLeftColor: "transparent" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`h-3 w-3 rounded-full border border-stone-400 ${getGroupColorClass(group.color)}`} />
+                      <div>
+                        <p className="text-sm font-semibold text-stone-900">{group.name}</p>
+                        <p className="mt-1 text-sm text-stone-500">{group.tags.length} tag{group.tags.length === 1 ? "" : "s"}</p>
+                      </div>
+                    </div>
+                    <span className={`text-stone-500 transition ${isCollapsed ? "-rotate-90" : "rotate-0"}`}>⌄</span>
+                  </button>
+
+                  {!isCollapsed ? (
+                    <div className="divide-y divide-stone-200 border-t border-stone-200">
+                      {group.tags.map((tag) => (
+                        <TagRow
+                          key={tag.id}
+                          tag={tag}
+                          groups={groupsWithTags}
+                          isExpanded={expandedTagId === tag.id}
+                          onExpand={setExpandedTagId}
+                          onCollapse={() => setExpandedTagId((currentId) => (currentId === tag.id ? null : currentId))}
+                          refreshTagData={refreshAllTagData}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
           </div>
         )}
       </div>
@@ -94,20 +217,22 @@ export default function TagsView({ tags: initialTags, refreshTags }) {
   );
 }
 
-function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
+function TagRow({ tag, groups, isExpanded, onExpand, onCollapse, refreshTagData }) {
   const [name, setName] = useState(tag.name || "");
+  const [selectedGroupId, setSelectedGroupId] = useState(tag.group_id ? String(tag.group_id) : "");
   const [isSaving, setIsSaving] = useState(false);
   const [saveState, setSaveState] = useState("idle");
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState("");
   const rowRef = useRef(null);
-  const lastSavedRef = useRef(tag.name || "");
+  const lastSavedNameRef = useRef(tag.name || "");
   const timeoutRef = useRef(null);
   const savePromiseRef = useRef(null);
 
   useEffect(() => {
     setName(tag.name || "");
-    lastSavedRef.current = tag.name || "";
+    setSelectedGroupId(tag.group_id ? String(tag.group_id) : "");
+    lastSavedNameRef.current = tag.name || "";
     setSaveState("idle");
     setError("");
   }, [tag]);
@@ -116,6 +241,8 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
     if (!isExpanded) {
       return undefined;
     }
+
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 
     function handlePointerDown(event) {
       const nextRow = event.target.closest("[data-tag-row-id]");
@@ -147,12 +274,18 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
       document.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isExpanded, onCollapse]);
+  }, [isExpanded, onCollapse, onExpand, tag.id]);
+
+  useEffect(() => () => {
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current);
+    }
+  }, []);
 
   const trimmedName = useMemo(() => name.trim(), [name]);
 
   async function persistName() {
-    if (trimmedName === lastSavedRef.current) {
+    if (trimmedName === lastSavedNameRef.current) {
       return true;
     }
 
@@ -172,9 +305,9 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
 
     const savePromise = updateTag(tag.id, { name: trimmedName })
       .then(async () => {
-        lastSavedRef.current = trimmedName;
+        lastSavedNameRef.current = trimmedName;
         setSaveState("saved");
-        await refreshTags();
+        await refreshTagData();
         return true;
       })
       .catch((saveError) => {
@@ -192,7 +325,7 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
   }
 
   useEffect(() => {
-    if (!isExpanded || trimmedName === lastSavedRef.current) {
+    if (!isExpanded || trimmedName === lastSavedNameRef.current) {
       return undefined;
     }
 
@@ -210,53 +343,39 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
     };
   }, [isExpanded, trimmedName]);
 
-  useEffect(() => () => {
-    if (timeoutRef.current) {
-      window.clearTimeout(timeoutRef.current);
+  async function handleGroupChange(nextGroupId) {
+    setSelectedGroupId(nextGroupId);
+    setError("");
+
+    try {
+      await updateTag(tag.id, {
+        group_id: nextGroupId ? Number(nextGroupId) : null
+      });
+      await refreshTagData();
+      onCollapse();
+    } catch (updateError) {
+      setError(updateError.message || "Failed to move tag");
     }
-  }, []);
+  }
 
   async function handleDelete(event) {
     event.stopPropagation();
+
+    if (!window.confirm(`This tag is used in ${tag.photo_count} photos and ${tag.video_count} videos. Are you sure?`)) {
+      return;
+    }
+
     setIsDeleting(true);
     setError("");
 
     try {
-      const [photosResponse, videosResponse] = await Promise.all([getPhotos(), getVideos()]);
-      const photoCount = (photosResponse?.data || []).filter((photo) => (
-        Array.isArray(photo.tags) && photo.tags.includes(tag.name)
-      )).length;
-      const videoCount = (videosResponse?.data || []).filter((video) => (
-        Array.isArray(video.tags) && video.tags.includes(tag.name)
-      )).length;
-
-      if (!window.confirm(`This tag is used in ${photoCount} photos and ${videoCount} videos. Are you sure?`)) {
-        setIsDeleting(false);
-        return;
-      }
-
       await deleteTag(tag.id);
-      await refreshTags();
+      await refreshTagData();
       onCollapse();
     } catch (deleteError) {
       setError(deleteError.message || "Failed to delete tag");
     } finally {
       setIsDeleting(false);
-    }
-  }
-
-  async function handleColorChange(nextColor, event) {
-    event.stopPropagation();
-    setError("");
-
-    try {
-      await updateTag(tag.id, {
-        color: tag.color === nextColor ? null : nextColor
-      });
-      await refreshTags();
-      onCollapse();
-    } catch (updateError) {
-      setError(updateError.message || "Failed to update tag color");
     }
   }
 
@@ -267,7 +386,6 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
         onClick={() => (isExpanded ? onCollapse() : onExpand(tag.id))}
         className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-stone-50"
       >
-        <div className={`h-4 w-4 shrink-0 rounded-full border border-stone-300 ${tag.color || "bg-white"}`} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-stone-900">{tag.name}</p>
         </div>
@@ -275,9 +393,6 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
           <span>{tag.photo_count} photos</span>
           <span>{tag.video_count} videos</span>
         </div>
-        <span className="btn-secondary px-4 py-2 text-sm">
-          {isExpanded ? "Done" : "Edit"}
-        </span>
       </button>
 
       {isExpanded ? (
@@ -293,26 +408,21 @@ function TagRow({ tag, refreshTags, isExpanded, onExpand, onCollapse }) {
               />
             </label>
 
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Color</span>
-              <div className="flex flex-wrap gap-2">
-                {COLOR_OPTIONS.map((colorClass) => {
-                  const isActive = tag.color === colorClass;
-
-                  return (
-                    <button
-                      key={colorClass}
-                      type="button"
-                      onClick={(event) => handleColorChange(colorClass, event)}
-                      className={`h-7 w-7 rounded-full border ${colorClass} ${
-                        isActive ? "ring-2 ring-stone-900 ring-offset-2" : "border-stone-300"
-                      }`}
-                      title={colorClass}
-                    />
-                  );
-                })}
-              </div>
-            </div>
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Group</span>
+              <select
+                value={selectedGroupId}
+                onChange={(event) => handleGroupChange(event.target.value)}
+                className="field max-w-[320px]"
+              >
+                <option value="">Ungrouped</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-stone-500">
               <div className="flex gap-4">
