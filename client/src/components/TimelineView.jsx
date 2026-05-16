@@ -14,6 +14,7 @@ const CONTENT_TYPE_OPTIONS = [
 
 function formatMonthRange(dateStart, dateEnd) {
   const formatter = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
     month: "short",
     year: "numeric"
   });
@@ -113,6 +114,7 @@ export default function TimelineView({ people, tags }) {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [activeDropZone, setActiveDropZone] = useState("");
   const [isUploadingToDestination, setIsUploadingToDestination] = useState(false);
+  const contentScrollRef = useRef(null);
 
   function syncLoadedPhotos(nextPhotos, { resetSelection = false } = {}) {
     setPhotos(nextPhotos);
@@ -360,8 +362,26 @@ export default function TimelineView({ people, tags }) {
     setEditingVideo(null);
   }
 
-  function handleBulkAction() {
-    setRefreshNonce((currentValue) => currentValue + 1);
+  async function refreshPhotosPreservingView({ resetSelection = false } = {}) {
+    const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
+    const photosResponse = await getPhotos(filters);
+    const nextPhotos = photosResponse?.data || [];
+
+    syncLoadedPhotos(nextPhotos, { resetSelection });
+
+    window.requestAnimationFrame(() => {
+      if (contentScrollRef.current) {
+        contentScrollRef.current.scrollTop = scrollTop;
+      }
+    });
+  }
+
+  async function handleBulkAction() {
+    try {
+      await refreshPhotosPreservingView();
+    } catch (refreshError) {
+      setError(refreshError.message || "Failed to refresh photos");
+    }
   }
 
   async function handleDestinationDrop(destination, fileList) {
@@ -408,6 +428,53 @@ export default function TimelineView({ people, tags }) {
   }
 
   const filteredPhotos = useMemo(() => sortPhotosForDisplay(photos, sortDirection), [photos, sortDirection]);
+  const visiblePhotosInOrder = useMemo(() => {
+    if (hasActiveFilters && !showNoContentDestinations) {
+      return contentType === "videos" ? [] : filteredPhotos;
+    }
+
+    const orderedPhotos = [];
+
+    if (contentType !== "videos") {
+      for (const destination of displayedDestinations) {
+        orderedPhotos.push(...destination.photos);
+      }
+    }
+
+    if (!showNoContentDestinations && contentType !== "videos") {
+      orderedPhotos.push(...groupedTimeline.undatedPhotos);
+    }
+
+    return orderedPhotos;
+  }, [
+    contentType,
+    displayedDestinations,
+    filteredPhotos,
+    groupedTimeline.undatedPhotos,
+    hasActiveFilters,
+    showNoContentDestinations
+  ]);
+
+  function navigateEditingPhoto(direction) {
+    if (!editingPhoto || visiblePhotosInOrder.length === 0) {
+      return;
+    }
+
+    const currentIndex = visiblePhotosInOrder.findIndex((photo) => photo.id === editingPhoto.id);
+
+    if (currentIndex === -1) {
+      return;
+    }
+
+    const nextIndex = currentIndex + direction;
+
+    if (nextIndex < 0 || nextIndex >= visiblePhotosInOrder.length) {
+      return;
+    }
+
+    setEditingVideo(null);
+    setEditingPhoto(visiblePhotosInOrder[nextIndex]);
+  }
 
   return (
     <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
@@ -506,7 +573,7 @@ export default function TimelineView({ people, tags }) {
                 Video results do not use the photo filters.
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-hidden">
+              <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
                 <PhotoGrid
                   photos={filteredPhotos}
                   onPhotoClick={(photo) => {
@@ -522,7 +589,7 @@ export default function TimelineView({ people, tags }) {
             )}
           </section>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-8 pb-4">
               {displayedDestinations.map((destination) => {
                 const visiblePhotos = contentType === "videos" ? [] : destination.photos;
@@ -702,6 +769,8 @@ export default function TimelineView({ people, tags }) {
             onClose={() => setEditingPhoto(null)}
             onSaved={handleSavedPhoto}
             onDeleted={handleDeletedPhoto}
+            onNavigatePrevious={() => navigateEditingPhoto(-1)}
+            onNavigateNext={() => navigateEditingPhoto(1)}
           />
         )}
       </div>

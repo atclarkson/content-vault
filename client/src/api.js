@@ -99,8 +99,29 @@ export async function createPerson(name) {
   return jsonRequest("/api/people", "POST", { name });
 }
 
-export async function getTags() {
-  return request("/api/tags");
+export async function updatePerson(id, data) {
+  return jsonRequest(`/api/people/${id}`, "PUT", data);
+}
+
+export async function deletePerson(id) {
+  return request(`/api/people/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getTags(sort) {
+  const query = sort ? `?sort=${encodeURIComponent(sort)}` : "";
+  return request(`/api/tags${query}`);
+}
+
+export async function updateTag(id, data) {
+  return jsonRequest(`/api/tags/${id}`, "PUT", data);
+}
+
+export async function deleteTag(id) {
+  return request(`/api/tags/${id}`, {
+    method: "DELETE"
+  });
 }
 
 export async function getDestinations() {

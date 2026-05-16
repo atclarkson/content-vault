@@ -1,5 +1,7 @@
 const NAV_ITEMS = [
   { id: "photos", label: "Timeline" },
+  { id: "people", label: "People" },
+  { id: "tags", label: "Tags" },
   { id: "upload", label: "Upload" },
   { id: "export", label: "Import / Export" }
 ];

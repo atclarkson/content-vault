@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { getPeople, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
+import PeopleView from "./components/PeopleView";
+import TagsView from "./components/TagsView";
 import TimelineView from "./components/TimelineView";
 import UploadView from "./components/UploadView";
 
 const VIEW_LABELS = {
   photos: "Timeline",
+  people: "People",
+  tags: "Tags",
   upload: "Upload",
   export: "Import / Export"
 };
@@ -16,6 +20,16 @@ export default function App() {
   const [people, setPeople] = useState([]);
   const [tags, setTags] = useState([]);
   const [error, setError] = useState("");
+
+  async function refreshPeople() {
+    const peopleResponse = await getPeople();
+    setPeople(peopleResponse?.data || []);
+  }
+
+  async function refreshTags() {
+    const tagsResponse = await getTags();
+    setTags(tagsResponse?.data || []);
+  }
 
   useEffect(() => {
     let isActive = true;
@@ -70,6 +84,10 @@ export default function App() {
 
           {currentView === "photos" ? (
             <TimelineView people={people} tags={tags} />
+          ) : currentView === "people" ? (
+            <PeopleView people={people} refreshPeople={refreshPeople} />
+          ) : currentView === "tags" ? (
+            <TagsView tags={tags} refreshTags={refreshTags} />
           ) : currentView === "upload" ? (
             <UploadView onNavigate={setCurrentView} />
           ) : (

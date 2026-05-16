@@ -35,14 +35,22 @@ function mapExportPhotos(db, photos) {
   const photoIds = photos.map((photo) => photo.id);
   const placeholders = createPlaceholders(photoIds.length);
   const peopleRows = db.prepare(`
-    SELECT photo_people.photo_id, people.name
+    SELECT
+      photo_people.photo_id,
+      people.id,
+      people.name,
+      people.birthday,
+      people.notes,
+      people.youtube_channel,
+      people.instagram,
+      people.website
     FROM photo_people
     INNER JOIN people ON people.id = photo_people.person_id
     WHERE photo_people.photo_id IN (${placeholders})
     ORDER BY people.name
   `).all(...photoIds);
   const tagRows = db.prepare(`
-    SELECT photo_tags.photo_id, tags.name
+    SELECT photo_tags.photo_id, tags.name, tags.color
     FROM photo_tags
     INNER JOIN tags ON tags.id = photo_tags.tag_id
     WHERE photo_tags.photo_id IN (${placeholders})
@@ -57,7 +65,15 @@ function mapExportPhotos(db, photos) {
       peopleMap.set(row.photo_id, []);
     }
 
-    peopleMap.get(row.photo_id).push(row.name);
+    peopleMap.get(row.photo_id).push({
+      id: row.id,
+      name: row.name,
+      birthday: row.birthday,
+      notes: row.notes,
+      youtube_channel: row.youtube_channel,
+      instagram: row.instagram,
+      website: row.website
+    });
   }
 
   for (const row of tagRows) {
@@ -65,7 +81,10 @@ function mapExportPhotos(db, photos) {
       tagsMap.set(row.photo_id, []);
     }
 
-    tagsMap.get(row.photo_id).push(row.name);
+    tagsMap.get(row.photo_id).push({
+      name: row.name,
+      color: row.color || null
+    });
   }
 
   return photos.map((photo) => ({
@@ -114,14 +133,22 @@ function mapExportVideos(db, videos) {
   const videoIds = videos.map((video) => video.id);
   const placeholders = createPlaceholders(videoIds.length);
   const peopleRows = db.prepare(`
-    SELECT video_people.video_id, people.name
+    SELECT
+      video_people.video_id,
+      people.id,
+      people.name,
+      people.birthday,
+      people.notes,
+      people.youtube_channel,
+      people.instagram,
+      people.website
     FROM video_people
     INNER JOIN people ON people.id = video_people.person_id
     WHERE video_people.video_id IN (${placeholders})
     ORDER BY people.name
   `).all(...videoIds);
   const tagRows = db.prepare(`
-    SELECT video_tags.video_id, tags.name
+    SELECT video_tags.video_id, tags.name, tags.color
     FROM video_tags
     INNER JOIN tags ON tags.id = video_tags.tag_id
     WHERE video_tags.video_id IN (${placeholders})
@@ -136,7 +163,15 @@ function mapExportVideos(db, videos) {
       peopleMap.set(row.video_id, []);
     }
 
-    peopleMap.get(row.video_id).push(row.name);
+    peopleMap.get(row.video_id).push({
+      id: row.id,
+      name: row.name,
+      birthday: row.birthday,
+      notes: row.notes,
+      youtube_channel: row.youtube_channel,
+      instagram: row.instagram,
+      website: row.website
+    });
   }
 
   for (const row of tagRows) {
@@ -144,7 +179,10 @@ function mapExportVideos(db, videos) {
       tagsMap.set(row.video_id, []);
     }
 
-    tagsMap.get(row.video_id).push(row.name);
+    tagsMap.get(row.video_id).push({
+      name: row.name,
+      color: row.color || null
+    });
   }
 
   return videos.map((video) => ({

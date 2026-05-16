@@ -71,6 +71,7 @@ router.post("/video/:id", async (req, res) => {
       data: {
         ai_caption: parsedResponse.aiCaption,
         alt_text: nextAltText || null,
+        suggested_title: parsedResponse.suggestedTitle || null,
       },
     });
   } catch (error) {
@@ -131,25 +132,12 @@ router.post("/:id", async (req, res) => {
       throw new Error("Anthropic response did not include a caption");
     }
 
-    const nextAltText =
-      enrichedPhoto.alt_text && String(enrichedPhoto.alt_text).trim()
-        ? enrichedPhoto.alt_text
-        : parsedResponse.altText;
-
-    db.prepare(
-      `
-      UPDATE photos
-      SET ai_caption = ?,
-          alt_text = ?,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-    ).run(parsedResponse.aiCaption, nextAltText || null, photoId);
-
     return res.json({
       data: {
         ai_caption: parsedResponse.aiCaption,
-        alt_text: nextAltText || null,
+        alt_text: parsedResponse.altText || null,
+        suggested_title: parsedResponse.suggestedTitle || null,
+        suggested_tags: parsedResponse.tagSuggestions || [],
       },
     });
   } catch (error) {
@@ -236,13 +224,25 @@ function parseAnthropicText(response) {
     .trim();
 
   const aiCaptionMatch = text.match(
-    /AI_CAPTION:\s*([\s\S]*?)(?:\nALT_TEXT:|$)/i,
+    /AI_CAPTION:\s*([\s\S]*?)(?:\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
   );
-  const altTextMatch = text.match(/ALT_TEXT:\s*([\s\S]*?)$/i);
+  const altTextMatch = text.match(
+    /ALT_TEXT:\s*([\s\S]*?)(?:\nTAG_SUGGESTIONS:|\nTITLE_SUGGESTION:|$)/i,
+  );
+  const tagSuggestionsMatch = text.match(
+    /TAG_SUGGESTIONS:\s*([\s\S]*?)(?:\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
+  );
+  const titleSuggestionMatch = text.match(/TITLE_SUGGESTION:\s*([\s\S]*?)$/i);
 
   return {
     aiCaption: cleanGeneratedText(aiCaptionMatch ? aiCaptionMatch[1] : text),
     altText: cleanGeneratedText(altTextMatch ? altTextMatch[1] : ""),
+    suggestedTitle: cleanGeneratedText(
+      titleSuggestionMatch ? titleSuggestionMatch[1] : "",
+    ),
+    tagSuggestions: parseSuggestedTags(
+      tagSuggestionsMatch ? tagSuggestionsMatch[1] : "",
+    ),
   };
 }
 
@@ -251,6 +251,15 @@ function cleanGeneratedText(value) {
     .trim()
     .replace(/^["']|["']$/g, "")
     .replace(/\s+/g, " ");
+}
+
+function parseSuggestedTags(value) {
+  return [...new Set(
+    String(value || "")
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean),
+  )];
 }
 
 function buildCaptionPrompt(photo) {
@@ -269,6 +278,9 @@ function buildCaptionPrompt(photo) {
     "",
     "Rules:",
     "- 1-2 sentences max for the caption",
+    "- Suggest a short, natural title, 4-10 words, not a filename",
+    "- Suggest 3-8 useful tags, lowercase, short, comma-separated, no hashtags",
+    "- Always include one tag describing the shot itself when it can be inferred from the image, for example: overhead shot, wide shot, close up shot, portrait shot, detail shot, street shot",
     "- Mention people by name, location, and approximate time when available",
     "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
     "- Be specific, not generic. Avoid vague positive filler.",
@@ -291,7 +303,9 @@ function buildCaptionPrompt(photo) {
     "",
     "Return exactly this format:",
     "AI_CAPTION: <caption here>",
+    "TAG_SUGGESTIONS: <comma-separated tags here>",
     "ALT_TEXT: <alt text here>",
+    "TITLE_SUGGESTION: <suggested title here>",
   ].join("\n");
 }
 
@@ -305,6 +319,7 @@ function buildVideoCaptionPrompt(video) {
     "",
     "Rules:",
     "- 1-2 sentences max for the caption",
+    "- Suggest a short, natural title, 4-10 words, not a filename",
     "- Mention people by name, location, and approximate time when available",
     "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
     "- Be specific, not generic. Avoid vague positive filler.",
@@ -332,6 +347,7 @@ function buildVideoCaptionPrompt(video) {
     "Return exactly this format:",
     "AI_CAPTION: <caption here>",
     "ALT_TEXT: <alt text here>",
+    "TITLE_SUGGESTION: <suggested title here>",
   ].join("\n");
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deletePhoto, generateCaption, getPhoto, updatePhoto } from "../api";
+import { deletePhoto, generateCaption, updatePhoto } from "../api";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
@@ -26,6 +26,7 @@ function hasExifData(photo) {
 function buildPayload({
   title,
   description,
+  aiCaption,
   altText,
   capturedAt,
   selectedPeopleIds,
@@ -38,6 +39,7 @@ function buildPayload({
   return {
     title,
     description,
+    ai_caption: aiCaption,
     alt_text: altText,
     captured_at: capturedAt || null,
     people: selectedPeopleIds,
@@ -76,6 +78,8 @@ export default function PhotoEditor({
   const [description, setDescription] = useState(photo?.description || "");
   const [aiCaption, setAiCaption] = useState(photo?.ai_caption || "");
   const [altText, setAltText] = useState(photo?.alt_text || "");
+  const [aiSuggestions, setAiSuggestions] = useState(null);
+  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const [capturedAt, setCapturedAt] = useState(formatDateForInput(photo?.captured_at));
   const [selectedPeopleIds, setSelectedPeopleIds] = useState((photo?.people || []).map((person) => person.id));
   const [tagNames, setTagNames] = useState(photo?.tags || []);
@@ -93,12 +97,23 @@ export default function PhotoEditor({
   const lastSavedPayloadRef = useRef("");
   const saveTimeoutRef = useRef(null);
   const savePromiseRef = useRef(null);
+  const previousPhotoIdRef = useRef(photo?.id || null);
 
   useEffect(() => {
+    const nextPhotoId = photo?.id || null;
+    const didSwitchPhotos = previousPhotoIdRef.current !== nextPhotoId;
+
     setTitle(photo?.title || "");
     setDescription(photo?.description || "");
     setAiCaption(photo?.ai_caption || "");
     setAltText(photo?.alt_text || "");
+
+    if (didSwitchPhotos) {
+      setAiSuggestions(null);
+      setIsSuggestionModalOpen(false);
+      setIsLightboxOpen(false);
+    }
+
     setCapturedAt(formatDateForInput(photo?.captured_at));
     setSelectedPeopleIds((photo?.people || []).map((person) => person.id));
     setTagNames(photo?.tags || []);
@@ -106,10 +121,10 @@ export default function PhotoEditor({
     setCity(photo?.city || "");
     setRegion(photo?.region || "");
     setCountry(photo?.country || "");
-    setIsLightboxOpen(false);
     lastSavedPayloadRef.current = photo ? JSON.stringify(buildPayload({
       title: photo.title || "",
       description: photo.description || "",
+      aiCaption: photo.ai_caption || "",
       altText: photo.alt_text || "",
       capturedAt: formatDateForInput(photo.captured_at),
       selectedPeopleIds: (photo.people || []).map((person) => person.id),
@@ -121,6 +136,7 @@ export default function PhotoEditor({
     })) : "";
     setSaveState("idle");
     setError("");
+    previousPhotoIdRef.current = nextPhotoId;
   }, [photo]);
 
   useEffect(() => {
@@ -131,6 +147,7 @@ export default function PhotoEditor({
   const currentPayload = useMemo(() => buildPayload({
     title,
     description,
+    aiCaption,
     altText,
     capturedAt,
     selectedPeopleIds,
@@ -139,7 +156,7 @@ export default function PhotoEditor({
     city,
     region,
     country
-  }), [title, description, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
+  }), [title, description, aiCaption, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
   const serializedPayload = useMemo(() => JSON.stringify(currentPayload), [currentPayload]);
 
   async function persistChanges() {
@@ -310,26 +327,69 @@ export default function PhotoEditor({
       return;
     }
 
+    setIsSuggestionModalOpen(true);
+    setAiSuggestions(null);
     setIsGeneratingCaption(true);
     setError("");
 
     try {
-      await generateCaption(photo.id);
-      const refreshedPhotoResponse = await getPhoto(photo.id);
-      const refreshedPhoto = refreshedPhotoResponse?.data;
-
-      if (!refreshedPhoto) {
-        throw new Error("Failed to refresh photo after caption generation");
-      }
-
-      setAiCaption(refreshedPhoto.ai_caption || "");
-      setAltText(refreshedPhoto.alt_text || "");
-      onSaved(refreshedPhoto);
+      const captionResponse = await generateCaption(photo.id);
+      setAiSuggestions({
+        title: captionResponse?.data?.suggested_title || "",
+        aiCaption: captionResponse?.data?.ai_caption || "",
+        altText: captionResponse?.data?.alt_text || "",
+        tags: captionResponse?.data?.suggested_tags || []
+      });
     } catch (captionError) {
+      setIsSuggestionModalOpen(false);
       setError(captionError.message || "Failed to generate AI caption");
     } finally {
       setIsGeneratingCaption(false);
     }
+  }
+
+  function handleAcceptSuggestedTitle() {
+    if (!aiSuggestions?.title) {
+      return;
+    }
+
+    setTitle(aiSuggestions.title);
+    setAiSuggestions((currentValue) => currentValue ? {
+      ...currentValue,
+      title: ""
+    } : currentValue);
+  }
+
+  function handleAcceptSuggestedCaption() {
+    if (!aiSuggestions?.aiCaption) {
+      return;
+    }
+
+    setAiCaption(aiSuggestions.aiCaption);
+    setAiSuggestions((currentValue) => currentValue ? {
+      ...currentValue,
+      aiCaption: ""
+    } : currentValue);
+  }
+
+  function handleAcceptSuggestedAltText() {
+    if (!aiSuggestions?.altText) {
+      return;
+    }
+
+    setAltText(aiSuggestions.altText);
+    setAiSuggestions((currentValue) => currentValue ? {
+      ...currentValue,
+      altText: ""
+    } : currentValue);
+  }
+
+  function handleAcceptSuggestedTag(tag) {
+    setTagNames((currentTags) => addTagIfMissing(currentTags, tag));
+    setAiSuggestions((currentValue) => currentValue ? {
+      ...currentValue,
+      tags: currentValue.tags.filter((currentTag) => currentTag !== tag)
+    } : currentValue);
   }
 
   if (!photo) {
@@ -428,7 +488,12 @@ export default function PhotoEditor({
                 disabled={isSaving || isDeleting || isGeneratingCaption}
                 className="btn-secondary"
               >
-                {isGeneratingCaption ? "Generating..." : aiCaption ? "Regenerate" : "Generate"}
+                {isGeneratingCaption ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />
+                    Analyzing...
+                  </span>
+                ) : "AI Analyze"}
               </button>
             </div>
             <div className="mt-4 border border-stone-300 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
@@ -568,6 +633,123 @@ export default function PhotoEditor({
           />
         </div>
       </div>
+      ) : null}
+
+      {isSuggestionModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/55 p-6"
+          onClick={() => {
+            if (!isGeneratingCaption) {
+              setIsSuggestionModalOpen(false);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-2xl border border-stone-300 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-stone-200 px-6 py-5">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">AI Suggestions</p>
+                <h3 className="mt-2 text-lg font-semibold text-stone-900">Review before applying</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSuggestionModalOpen(false)}
+                disabled={isGeneratingCaption}
+                className="btn-secondary px-4 py-2 text-sm"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+              {isGeneratingCaption ? (
+                <div className="py-10 text-center">
+                  <div className="inline-flex items-center gap-3">
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-900" />
+                    <p className="text-sm font-medium text-stone-700">Analyzing photo...</p>
+                  </div>
+                  <p className="mt-2 text-sm text-stone-500">Looking at the image, metadata, and current notes.</p>
+                </div>
+              ) : aiSuggestions ? (
+                <div className="space-y-5">
+                  <section className="border-b border-stone-200 pb-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Title</p>
+                        <p className="mt-2 text-base text-stone-900">
+                          {aiSuggestions.title || "No title suggestion."}
+                        </p>
+                      </div>
+                      {aiSuggestions.title ? (
+                        <button type="button" onClick={handleAcceptSuggestedTitle} className="btn-primary">
+                          Accept
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="border-b border-stone-200 pb-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Caption</p>
+                        <p className="mt-2 text-sm leading-6 text-stone-700">
+                          {aiSuggestions.aiCaption || "No caption suggestion."}
+                        </p>
+                      </div>
+                      {aiSuggestions.aiCaption ? (
+                        <button type="button" onClick={handleAcceptSuggestedCaption} className="btn-primary">
+                          Accept
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="border-b border-stone-200 pb-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Alt Text</p>
+                        <p className="mt-2 text-sm leading-6 text-stone-700">
+                          {aiSuggestions.altText || "No alt text suggestion."}
+                        </p>
+                      </div>
+                      {aiSuggestions.altText ? (
+                        <button type="button" onClick={handleAcceptSuggestedAltText} className="btn-primary">
+                          Accept
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section>
+                    <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
+                    {aiSuggestions.tags.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {aiSuggestions.tags.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => handleAcceptSuggestedTag(tag)}
+                            className="rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:border-amber-400 hover:bg-amber-50"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-stone-500">No tag suggestions.</p>
+                    )}
+                  </section>
+                </div>
+              ) : (
+                <div className="py-10 text-center text-sm text-stone-500">
+                  No suggestions available.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
     </aside>
   );

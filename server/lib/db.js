@@ -27,6 +27,7 @@ function initializeDatabase() {
 
   database.exec(schemaSql);
   ensurePhotoColumns(database);
+  ensurePeopleAndTagColumns(database);
   ensureDestinationsTable(database);
   ensureVideoTables(database);
   seedPeople(database);
@@ -110,6 +111,38 @@ function seedPeople(database) {
   });
 
   insertMany(defaultPeople);
+}
+
+function ensurePeopleAndTagColumns(database) {
+  ensureTableColumns(database, "people", [
+    {
+      name: "birthday",
+      sql: "ALTER TABLE people ADD COLUMN birthday TEXT"
+    },
+    {
+      name: "notes",
+      sql: "ALTER TABLE people ADD COLUMN notes TEXT"
+    },
+    {
+      name: "youtube_channel",
+      sql: "ALTER TABLE people ADD COLUMN youtube_channel TEXT"
+    },
+    {
+      name: "instagram",
+      sql: "ALTER TABLE people ADD COLUMN instagram TEXT"
+    },
+    {
+      name: "website",
+      sql: "ALTER TABLE people ADD COLUMN website TEXT"
+    }
+  ]);
+
+  ensureTableColumns(database, "tags", [
+    {
+      name: "color",
+      sql: "ALTER TABLE tags ADD COLUMN color TEXT"
+    }
+  ]);
 }
 
 function ensureDestinationsTable(database) {
@@ -196,6 +229,17 @@ function ensureVideoTables(database) {
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_filmed ON videos (date_filmed)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_deleted_at ON videos (deleted_at)");
+}
+
+function ensureTableColumns(database, tableName, missingColumns) {
+  const columns = database.prepare(`PRAGMA table_info(${tableName})`).all();
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  for (const column of missingColumns) {
+    if (!columnNames.has(column.name)) {
+      database.exec(column.sql);
+    }
+  }
 }
 
 function getDb() {
