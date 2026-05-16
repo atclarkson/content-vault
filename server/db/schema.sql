@@ -6,10 +6,13 @@ CREATE TABLE IF NOT EXISTS photos (
   mime_type TEXT,
   file_size_bytes INTEGER,
   sha256_hash TEXT UNIQUE,
+  md5_hash TEXT,
+  day_one_uuid TEXT,
   width INTEGER,
   height INTEGER,
   title TEXT,
   description TEXT,
+  notes_for_ai TEXT,
   alt_text TEXT,
   ai_caption TEXT,
   captured_at TEXT,
@@ -158,6 +161,25 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS journal_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_one_uuid TEXT NOT NULL UNIQUE,
+  entry_date TEXT NOT NULL,
+  title TEXT,
+  text TEXT,
+  city TEXT,
+  country TEXT,
+  latitude REAL,
+  longitude REAL,
+  place_name TEXT,
+  weather_conditions TEXT,
+  weather_description TEXT,
+  temperature_celsius REAL,
+  wind_speed_kph REAL,
+  humidity INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_photos_processing_status ON photos (processing_status);
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos (captured_at);
@@ -166,3 +188,4 @@ CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_sta
 CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published);
 CREATE INDEX IF NOT EXISTS idx_videos_date_filmed ON videos (date_filmed);
 CREATE INDEX IF NOT EXISTS idx_videos_deleted_at ON videos (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_journal_entries_date ON journal_entries (entry_date);

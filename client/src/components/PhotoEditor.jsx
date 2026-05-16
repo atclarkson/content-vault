@@ -39,6 +39,7 @@ function hasExifData(photo) {
 function buildPayload({
   title,
   description,
+  notesForAi,
   aiCaption,
   altText,
   capturedAt,
@@ -52,6 +53,7 @@ function buildPayload({
   return {
     title,
     description,
+    notes_for_ai: notesForAi,
     ai_caption: aiCaption,
     alt_text: altText,
     captured_at: capturedAt || null,
@@ -98,6 +100,7 @@ export default function PhotoEditor({
 }) {
   const [title, setTitle] = useState(photo?.title || "");
   const [description, setDescription] = useState(photo?.description || "");
+  const [notesForAi, setNotesForAi] = useState(photo?.notes_for_ai || "");
   const [aiCaption, setAiCaption] = useState(photo?.ai_caption || "");
   const [altText, setAltText] = useState(photo?.alt_text || "");
   const [aiSuggestions, setAiSuggestions] = useState(null);
@@ -127,6 +130,7 @@ export default function PhotoEditor({
 
     setTitle(photo?.title || "");
     setDescription(photo?.description || "");
+    setNotesForAi(photo?.notes_for_ai || "");
     setAiCaption(photo?.ai_caption || "");
     setAltText(photo?.alt_text || "");
 
@@ -146,6 +150,7 @@ export default function PhotoEditor({
     lastSavedPayloadRef.current = photo ? JSON.stringify(buildPayload({
       title: photo.title || "",
       description: photo.description || "",
+      notesForAi: photo.notes_for_ai || "",
       aiCaption: photo.ai_caption || "",
       altText: photo.alt_text || "",
       capturedAt: formatDateForInput(photo.captured_at),
@@ -195,6 +200,7 @@ export default function PhotoEditor({
   const currentPayload = useMemo(() => buildPayload({
     title,
     description,
+    notesForAi,
     aiCaption,
     altText,
     capturedAt,
@@ -204,7 +210,7 @@ export default function PhotoEditor({
     city,
     region,
     country
-  }), [title, description, aiCaption, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
+  }), [title, description, notesForAi, aiCaption, altText, capturedAt, selectedPeopleIds, tagNames, neighborhood, city, region, country]);
   const serializedPayload = useMemo(() => JSON.stringify(currentPayload), [currentPayload]);
 
   async function persistChanges() {
@@ -515,14 +521,26 @@ export default function PhotoEditor({
           </label>
 
           <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Notes for AI</span>
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Description</span>
             <span className="mb-2 block text-sm text-stone-500">
-              Private thoughts or context about the moment. This is for better caption generation, not public-facing copy.
+              Public-facing. This may appear in blog content.
             </span>
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               className="field min-h-[120px] resize-y"
+            />
+          </label>
+
+          <label className="block rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-amber-800">Notes for AI</span>
+            <span className="mb-2 block text-sm text-amber-900/80">
+              Private context for caption generation. Never published.
+            </span>
+            <textarea
+              value={notesForAi}
+              onChange={(event) => setNotesForAi(event.target.value)}
+              className="field min-h-[120px] resize-y border-amber-300 bg-white/90"
             />
           </label>
 

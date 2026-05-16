@@ -27,6 +27,7 @@ function initializeDatabase() {
 
   database.exec(schemaSql);
   ensurePhotoColumns(database);
+  ensureJournalTables(database);
   ensurePeopleAndTagColumns(database);
   ensureTagGroupsTable(database);
   ensureDestinationsTable(database);
@@ -48,6 +49,10 @@ function ensurePhotoColumns(database) {
     {
       name: "description",
       sql: "ALTER TABLE photos ADD COLUMN description TEXT"
+    },
+    {
+      name: "notes_for_ai",
+      sql: "ALTER TABLE photos ADD COLUMN notes_for_ai TEXT"
     },
     {
       name: "alt_text",
@@ -162,6 +167,49 @@ function ensureDestinationsTable(database) {
   `);
 
   database.exec("CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start)");
+}
+
+function ensureJournalTables(database) {
+  ensureTableColumns(database, "photos", [
+    {
+      name: "md5_hash",
+      sql: "ALTER TABLE photos ADD COLUMN md5_hash TEXT"
+    },
+    {
+      name: "day_one_uuid",
+      sql: "ALTER TABLE photos ADD COLUMN day_one_uuid TEXT"
+    }
+  ]);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_one_uuid TEXT NOT NULL UNIQUE,
+      entry_date TEXT NOT NULL,
+      title TEXT,
+      text TEXT,
+      city TEXT,
+      country TEXT,
+      latitude REAL,
+      longitude REAL,
+      place_name TEXT,
+      weather_conditions TEXT,
+      weather_description TEXT,
+      temperature_celsius REAL,
+      wind_speed_kph REAL,
+      humidity INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  ensureTableColumns(database, "journal_entries", [
+    {
+      name: "title",
+      sql: "ALTER TABLE journal_entries ADD COLUMN title TEXT"
+    }
+  ]);
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_journal_entries_date ON journal_entries (entry_date)");
 }
 
 function ensureTagGroupsTable(database) {

@@ -22,6 +22,7 @@ app.use("/api/tags", require("./routes/tags"));
 app.use("/api/tag-groups", require("./routes/tag-groups"));
 app.use("/api/export", require("./routes/export"));
 app.use("/api/caption", require("./routes/caption"));
+app.use("/api/import/day-one", require("./routes/day-one"));
 app.use("/api/destinations", require("./routes/destinations"));
 app.use("/api/videos", require("./routes/videos"));
 app.use("/api/settings", require("./routes/settings"));

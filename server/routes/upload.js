@@ -5,7 +5,7 @@ const multer = require("multer");
 const exifReader = require("exif-reader");
 const processImage = require("../lib/image");
 const { uploadFile, deleteFile } = require("../lib/r2");
-const hashFile = require("../lib/hash");
+const { hashFile, md5File } = require("../lib/hash");
 const reverseGeocode = require("../lib/geo");
 const { defaultQueue } = require("../lib/queue");
 const { initializeDatabase } = require("../lib/db");
@@ -96,6 +96,7 @@ const insertPhoto = db.prepare(`
     mime_type,
     file_size_bytes,
     sha256_hash,
+    md5_hash,
     width,
     height,
     title,
@@ -119,7 +120,7 @@ const insertPhoto = db.prepare(`
     thumbnail_url,
     small_url,
     large_url
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const selectPhotoById = db.prepare(`
@@ -146,6 +147,7 @@ const restoreDeletedPhoto = db.prepare(`
       mime_type = ?,
       file_size_bytes = ?,
       sha256_hash = ?,
+      md5_hash = ?,
       width = ?,
       height = ?,
       title = ?,
@@ -247,6 +249,7 @@ async function processUpload(file) {
     EXTENSION_MIME_TYPES[originalExtension] ||
     "application/octet-stream";
   const fileHash = hashFile(file.buffer);
+  const md5Hash = md5File(file.buffer);
   const derivedTitle = buildTitleFromFilename(file.originalname);
   const existingPhoto = findActivePhotoByHash.get(fileHash);
   const deletedPhoto = existingPhoto ? null : findDeletedPhotoByHash.get(fileHash);
@@ -256,6 +259,7 @@ async function processUpload(file) {
       skipped: true,
       reason: "duplicate",
       filename: file.originalname,
+      photo: existingPhoto,
     };
   }
 
@@ -308,6 +312,7 @@ async function processUpload(file) {
         originalMimeType,
         file.size,
         fileHash,
+        md5Hash,
         processedImage.exif.width || null,
         processedImage.exif.height || null,
         derivedTitle,
@@ -353,6 +358,7 @@ async function processUpload(file) {
         originalMimeType,
         file.size,
         fileHash,
+        md5Hash,
         processedImage.exif.width || null,
         processedImage.exif.height || null,
         derivedTitle,
@@ -569,3 +575,4 @@ function allNulls() {
 }
 
 module.exports = router;
+module.exports.processUpload = processUpload;

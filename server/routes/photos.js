@@ -149,6 +149,7 @@ router.put("/:id", (req, res) => {
 
     addScalarUpdate(updates, params, payload, "title");
     addScalarUpdate(updates, params, payload, "description");
+    addScalarUpdate(updates, params, payload, "notes_for_ai");
     addScalarUpdate(updates, params, payload, "alt_text");
     addScalarUpdate(updates, params, payload, "ai_caption");
     addScalarUpdate(updates, params, payload, "camera_make");
