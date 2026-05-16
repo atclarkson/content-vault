@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   exportCatalog,
   getPhotos,
@@ -42,7 +42,33 @@ function triggerDownload(data, filename) {
   URL.revokeObjectURL(objectUrl);
 }
 
-export default function ExportView() {
+function buildExportFilters(formState) {
+  const filters = {};
+
+  if (formState.date_from) {
+    filters.date_from = formState.date_from;
+  }
+
+  if (formState.date_to) {
+    filters.date_to = formState.date_to;
+  }
+
+  if (formState.country.trim()) {
+    filters.country = formState.country.trim();
+  }
+
+  if (formState.city.trim()) {
+    filters.city = formState.city.trim();
+  }
+
+  if (formState.people.length > 0) {
+    filters.people = formState.people.join(",");
+  }
+
+  return filters;
+}
+
+export default function ExportView({ people }) {
   const [stats, setStats] = useState({
     totalPhotos: 0,
     missingAltText: 0,
@@ -55,6 +81,13 @@ export default function ExportView() {
     longform: 0
   });
   const [destinationFile, setDestinationFile] = useState(null);
+  const [exportFilters, setExportFilters] = useState({
+    date_from: "",
+    date_to: "",
+    country: "",
+    city: "",
+    people: []
+  });
   const [isImportingDestinations, setIsImportingDestinations] = useState(false);
   const [destinationImportMessage, setDestinationImportMessage] = useState("");
   const [destinationImportError, setDestinationImportError] = useState("");
@@ -66,6 +99,9 @@ export default function ExportView() {
   const [youtubeMessage, setYoutubeMessage] = useState("");
   const [youtubeError, setYoutubeError] = useState("");
   const [error, setError] = useState("");
+  const destinationInputRef = useRef(null);
+
+  const activeExportFilters = useMemo(() => buildExportFilters(exportFilters), [exportFilters]);
 
   async function loadPhotoStats() {
     setIsLoadingStats(true);
@@ -118,8 +154,8 @@ export default function ExportView() {
     setError("");
 
     try {
-      const response = await exportCatalog();
-      triggerDownload(response?.data || [], getExportFilename());
+      const response = await exportCatalog(activeExportFilters);
+      triggerDownload(response?.data || {}, getExportFilename());
     } catch (exportError) {
       setError(exportError.message || "Failed to export catalog");
     } finally {
@@ -185,6 +221,15 @@ export default function ExportView() {
     }
   }
 
+  function toggleExportPerson(personName) {
+    setExportFilters((currentValue) => ({
+      ...currentValue,
+      people: currentValue.people.includes(personName)
+        ? currentValue.people.filter((currentPerson) => currentPerson !== personName)
+        : [...currentValue.people, personName]
+    }));
+  }
+
   return (
     <section className="panel p-6">
       <div className="mb-6">
@@ -204,21 +249,31 @@ export default function ExportView() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="block min-w-[320px] flex-1">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">CSV File</span>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => {
-                const nextFile = event.target.files && event.target.files[0] ? event.target.files[0] : null;
-                setDestinationFile(nextFile);
-                setDestinationImportMessage("");
-                setDestinationImportError("");
-              }}
-              className="field"
-            />
-          </label>
+        <input
+          ref={destinationInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(event) => {
+            const nextFile = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+            setDestinationFile(nextFile);
+            setDestinationImportMessage("");
+            setDestinationImportError("");
+          }}
+          className="hidden"
+        />
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => destinationInputRef.current?.click()}
+            className="btn-secondary"
+          >
+            Choose CSV
+          </button>
+
+          <span className="text-sm text-stone-600">
+            {destinationFile ? destinationFile.name : "No file selected"}
+          </span>
 
           <button
             type="button"
@@ -229,12 +284,6 @@ export default function ExportView() {
             {isImportingDestinations ? "Importing..." : "Import Destinations"}
           </button>
         </div>
-
-        {destinationFile ? (
-          <p className="mt-3 text-sm text-stone-600">
-            Selected: {destinationFile.name}
-          </p>
-        ) : null}
 
         {isImportingDestinations ? (
           <p className="mt-3 text-sm text-stone-600">Uploading and processing destination CSV...</p>
@@ -301,7 +350,7 @@ export default function ExportView() {
         ) : null}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Total Photos" value={isLoadingStats ? "..." : stats.totalPhotos} />
         <StatCard label="Total Videos" value={isLoadingVideoStats ? "..." : videoStats.totalVideos} />
         <StatCard label="Missing Alt Text" value={isLoadingStats ? "..." : stats.missingAltText} />
@@ -310,9 +359,78 @@ export default function ExportView() {
       </div>
 
       <div className="mt-8 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-6">
-        <div className="flex flex-wrap items-center gap-3">
+        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Export Filters</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date From</span>
+            <input
+              type="date"
+              value={exportFilters.date_from}
+              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_from: event.target.value }))}
+              className="field"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date To</span>
+            <input
+              type="date"
+              value={exportFilters.date_to}
+              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_to: event.target.value }))}
+              className="field"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Country</span>
+            <input
+              type="text"
+              value={exportFilters.country}
+              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, country: event.target.value }))}
+              className="field"
+              placeholder="Filter by country"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">City</span>
+            <input
+              type="text"
+              value={exportFilters.city}
+              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, city: event.target.value }))}
+              className="field"
+              placeholder="Filter by city"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5">
+          <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">People</p>
+          <div className="flex flex-wrap gap-3">
+            {people.map((person) => (
+              <label key={person.id} className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700">
+                <input
+                  type="checkbox"
+                  checked={exportFilters.people.includes(person.name)}
+                  onChange={() => toggleExportPerson(person.name)}
+                  className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                />
+                <span>{person.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <button type="button" onClick={handleExport} disabled={isExporting || isLoadingStats} className="btn-primary">
             {isExporting ? "Preparing Export..." : "Download JSON Export"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setExportFilters({ date_from: "", date_to: "", country: "", city: "", people: [] })}
+            className="btn-secondary"
+          >
+            Clear Filters
           </button>
         </div>
 
@@ -324,9 +442,9 @@ export default function ExportView() {
 
 function StatCard({ label, value }) {
   return (
-    <div className="rounded-[1.75rem] border border-stone-300 bg-stone-50/80 px-5 py-5">
+    <div className="border border-stone-300 bg-white px-5 py-4">
       <p className="text-xs uppercase tracking-[0.24em] text-stone-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-stone-900">{value}</p>
+      <p className="mt-3 text-2xl font-semibold text-stone-900">{value}</p>
     </div>
   );
 }

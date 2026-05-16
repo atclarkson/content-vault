@@ -219,8 +219,8 @@ export async function importDestinations(file) {
   });
 }
 
-export async function exportCatalog() {
-  return request("/api/export");
+export async function exportCatalog(filters = {}) {
+  return request(`/api/export${buildQueryString(filters)}`);
 }
 
 export async function uploadPhotos(files, onProgress) {

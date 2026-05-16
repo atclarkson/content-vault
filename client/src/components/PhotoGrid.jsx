@@ -10,12 +10,8 @@ const SORT_OPTIONS = [
   { id: "filename", label: "Filename" }
 ];
 
-function hasMissingMetadata(photo) {
-  const missingTitle = !photo.title || !String(photo.title).trim();
-  const missingPeople = !Array.isArray(photo.people) || photo.people.length === 0;
-  const missingTags = !Array.isArray(photo.tags) || photo.tags.length === 0;
-
-  return missingTitle || missingPeople || missingTags;
+function needsAiCaption(photo) {
+  return !photo.ai_caption || !String(photo.ai_caption).trim();
 }
 
 function toggleSelection(selectedIds, photoId, shouldSelect) {
@@ -202,7 +198,7 @@ export default function PhotoGrid({
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {photos.map((photo) => {
             const isSelected = selectedIds.has(photo.id);
-            const showWarning = hasMissingMetadata(photo);
+            const showWarning = needsAiCaption(photo);
 
             return (
               <article
@@ -271,7 +267,7 @@ export default function PhotoGrid({
                     {showWarning ? (
                       <div
                         className="absolute right-3 top-3 h-3 w-3 rounded-full bg-amber-400 shadow-[0_0_0_3px_rgba(255,255,255,0.8)]"
-                        title="Missing title, people, or tags"
+                        title="Needs AI caption"
                       />
                     ) : null}
 

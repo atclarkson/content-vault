@@ -100,6 +100,7 @@ export default function TagInput({ tags, allTags, tagGroups, onChange }) {
   const [allTagsSnapshot, setAllTagsSnapshot] = useState(allTags || []);
   const [tagGroupsSnapshot, setTagGroupsSnapshot] = useState(tagGroups || []);
   const [assigningTagName, setAssigningTagName] = useState("");
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
   const [isRefreshingGroups, setIsRefreshingGroups] = useState(false);
   const [error, setError] = useState("");
   const normalizedInput = normalizeTag(inputValue);
@@ -144,6 +145,25 @@ export default function TagInput({ tags, allTags, tagGroups, onChange }) {
 
     return groupSuggestions(flatTagCatalog, tags, normalizedInput).slice(0, 8);
   }, [flatTagCatalog, normalizedInput, tags]);
+  const flatSuggestions = useMemo(
+    () => suggestions.flatMap((group) => group.tags),
+    [suggestions]
+  );
+
+  useEffect(() => {
+    if (flatSuggestions.length === 0) {
+      setHighlightedSuggestionIndex(-1);
+      return;
+    }
+
+    setHighlightedSuggestionIndex((currentIndex) => {
+      if (currentIndex >= flatSuggestions.length) {
+        return 0;
+      }
+
+      return currentIndex;
+    });
+  }, [flatSuggestions]);
 
   async function refreshLocalTagData() {
     setIsRefreshingGroups(true);
@@ -176,6 +196,7 @@ export default function TagInput({ tags, allTags, tagGroups, onChange }) {
     onChange([...tags, existingTag?.name || normalizedTag]);
     setInputValue("");
     setAssigningTagName(existingTag?.name || normalizedTag);
+    setHighlightedSuggestionIndex(-1);
     setError("");
   }
 
@@ -189,9 +210,58 @@ export default function TagInput({ tags, allTags, tagGroups, onChange }) {
   }
 
   function handleKeyDown(event) {
-    if (event.key === "Enter" || event.key === ",") {
+    if (event.key === "ArrowDown") {
+      if (flatSuggestions.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      setHighlightedSuggestionIndex((currentIndex) => {
+        if (currentIndex < 0) {
+          return 0;
+        }
+
+        return (currentIndex + 1) % flatSuggestions.length;
+      });
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      if (flatSuggestions.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      setHighlightedSuggestionIndex((currentIndex) => {
+        if (currentIndex < 0) {
+          return flatSuggestions.length - 1;
+        }
+
+        return (currentIndex - 1 + flatSuggestions.length) % flatSuggestions.length;
+      });
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+
+      if (highlightedSuggestionIndex >= 0 && flatSuggestions[highlightedSuggestionIndex]) {
+        addTag(flatSuggestions[highlightedSuggestionIndex].name);
+        return;
+      }
+
+      addTag(inputValue);
+      return;
+    }
+
+    if (event.key === ",") {
       event.preventDefault();
       addTag(inputValue);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      setHighlightedSuggestionIndex(-1);
     }
   }
 
@@ -314,16 +384,24 @@ export default function TagInput({ tags, allTags, tagGroups, onChange }) {
                     <p className="text-xs uppercase tracking-[0.2em] text-stone-500">{group.name}</p>
                   </div>
                   <div className="space-y-1">
-                    {group.tags.map((suggestion) => (
-                      <button
-                        key={suggestion.id}
-                        type="button"
-                        onClick={() => addTag(suggestion.name)}
-                        className="block w-full rounded-2xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
-                      >
-                        {suggestion.name}
-                      </button>
-                    ))}
+                    {group.tags.map((suggestion) => {
+                      const suggestionIndex = flatSuggestions.findIndex((item) => item.id === suggestion.id);
+                      const isHighlighted = suggestionIndex === highlightedSuggestionIndex;
+
+                      return (
+                        <button
+                          key={suggestion.id}
+                          type="button"
+                          onClick={() => addTag(suggestion.name)}
+                          onMouseEnter={() => setHighlightedSuggestionIndex(suggestionIndex)}
+                          className={`block w-full rounded-2xl px-3 py-2 text-left text-sm text-stone-700 transition ${
+                            isHighlighted ? "bg-stone-100" : "hover:bg-stone-100"
+                          }`}
+                        >
+                          {suggestion.name}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

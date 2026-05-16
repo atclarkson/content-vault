@@ -174,19 +174,24 @@ export default function PhotoEditor({
     const tagByKey = new Map(
       tags.map((entry) => [normalizeTagKey(entry.name), entry])
     );
+    const groupByName = new Map(
+      (tagGroups || []).map((group) => [String(group.name || "").trim().toLowerCase(), group])
+    );
     const appliedTagSet = new Set(tagNames.map((tag) => normalizeTagKey(tag)));
 
     return aiSuggestions.tags
-      .filter((tag) => !appliedTagSet.has(normalizeTagKey(tag)))
+      .filter((tag) => !appliedTagSet.has(normalizeTagKey(tag.name || tag)))
       .map((tag) => {
-        const tagRecord = tagByKey.get(normalizeTagKey(tag));
+        const tagName = tag.name || tag;
+        const tagRecord = tagByKey.get(normalizeTagKey(tagName));
+        const matchingGroup = groupByName.get(String(tag.group_name || "").trim().toLowerCase());
 
         return {
-          name: tagRecord?.name || tag,
-          groupColor: tagRecord?.group_color || null
+          name: tagRecord?.name || tagName,
+          groupColor: tagRecord?.group_color || matchingGroup?.color || null
         };
       });
-  }, [aiSuggestions?.tags, tagNames, tags]);
+  }, [aiSuggestions?.tags, tagGroups, tagNames, tags]);
   const currentPayload = useMemo(() => buildPayload({
     title,
     description,

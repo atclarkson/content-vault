@@ -106,7 +106,7 @@ export default function App() {
           ) : currentView === "upload" ? (
             <UploadView onNavigate={setCurrentView} />
           ) : (
-            <ExportView />
+            <ExportView people={people} />
           )}
         </div>
       </main>

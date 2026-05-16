@@ -241,7 +241,7 @@ function parseAnthropicText(response) {
     suggestedTitle: cleanGeneratedText(
       titleSuggestionMatch ? titleSuggestionMatch[1] : "",
     ),
-    tagSuggestions: parseSuggestedTags(
+    tagSuggestions: parseSuggestedTagsWithGroups(
       tagSuggestionsMatch ? tagSuggestionsMatch[1] : "",
     ),
   };
@@ -254,13 +254,36 @@ function cleanGeneratedText(value) {
     .replace(/\s+/g, " ");
 }
 
-function parseSuggestedTags(value) {
-  return [...new Set(
-    String(value || "")
-      .split(",")
-      .map((tag) => tag.trim().toLowerCase())
-      .filter(Boolean),
-  )];
+function parseSuggestedTagsWithGroups(value) {
+  const suggestions = [];
+  const seen = new Set();
+
+  for (const item of String(value || "").split(",")) {
+    const trimmedItem = item.trim();
+
+    if (!trimmedItem) {
+      continue;
+    }
+
+    const [rawGroupName, ...rawTagParts] = trimmedItem.split(">");
+    const tagName = (rawTagParts.length > 0 ? rawTagParts.join(">") : rawGroupName)
+      .trim()
+      .toLowerCase();
+    const groupName = rawTagParts.length > 0 ? rawGroupName.trim() : "";
+    const key = `${groupName.toLowerCase()}::${tagName}`;
+
+    if (!tagName || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    suggestions.push({
+      name: tagName,
+      group_name: groupName || null
+    });
+  }
+
+  return suggestions;
 }
 
 function buildCaptionPrompt(photo, tagTaxonomy) {
@@ -310,7 +333,7 @@ function buildCaptionPrompt(photo, tagTaxonomy) {
     "",
     "Return exactly this format:",
     "AI_CAPTION: <caption here>",
-    "TAG_SUGGESTIONS: <comma-separated tags here>",
+    "TAG_SUGGESTIONS: <comma-separated Group>tag pairs here>",
     "ALT_TEXT: <alt text here>",
     "TITLE_SUGGESTION: <suggested title here>",
   ].join("\n");

@@ -6,18 +6,20 @@ const router = express.Router();
 router.get("/", (req, res) => {
   try {
     const db = getDb();
+    const photoFilters = buildPhotoExportFilters(req.query);
+    const videoFilters = buildVideoExportFilters(req.query);
     const photos = db.prepare(`
       SELECT photos.*
       FROM photos
-      WHERE photos.deleted_at IS NULL
+      ${photoFilters.whereClause}
       ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC
-    `).all();
+    `).all(...photoFilters.params);
     const videos = db.prepare(`
       SELECT videos.*
       FROM videos
-      WHERE videos.deleted_at IS NULL
+      ${videoFilters.whereClause}
       ORDER BY videos.date_published DESC, videos.id DESC
-    `).all();
+    `).all(...videoFilters.params);
 
     const exportedPhotos = mapExportPhotos(db, photos);
     const exportedVideos = mapExportVideos(db, videos);
@@ -125,6 +127,83 @@ function mapExportPhotos(db, photos) {
   }));
 }
 
+function buildPhotoExportFilters(query) {
+  const conditions = ["photos.deleted_at IS NULL"];
+  const params = [];
+
+  if (query.date_from) {
+    conditions.push("photos.captured_at >= ?");
+    params.push(query.date_from);
+  }
+
+  if (query.date_to) {
+    conditions.push("photos.captured_at <= ?");
+    params.push(query.date_to);
+  }
+
+  if (query.country) {
+    conditions.push("LOWER(COALESCE(photos.country, '')) LIKE ?");
+    params.push(`%${String(query.country).trim().toLowerCase()}%`);
+  }
+
+  if (query.city) {
+    conditions.push("LOWER(COALESCE(photos.city, '')) LIKE ?");
+    params.push(`%${String(query.city).trim().toLowerCase()}%`);
+  }
+
+  const people = parseCsvList(query.people);
+
+  if (people.length > 0) {
+    const placeholders = createPlaceholders(people.length);
+    conditions.push(`
+      photos.id IN (
+        SELECT photo_people.photo_id
+        FROM photo_people
+        INNER JOIN people ON people.id = photo_people.person_id
+        WHERE people.name IN (${placeholders})
+        GROUP BY photo_people.photo_id
+        HAVING COUNT(DISTINCT people.name) = ?
+      )
+    `);
+    params.push(...people, people.length);
+  }
+
+  return {
+    whereClause: `WHERE ${conditions.join(" AND ")}`,
+    params
+  };
+}
+
+function buildVideoExportFilters(query) {
+  const conditions = ["videos.deleted_at IS NULL"];
+  const params = [];
+
+  if (query.date_from) {
+    conditions.push("videos.date_filmed >= ?");
+    params.push(query.date_from);
+  }
+
+  if (query.date_to) {
+    conditions.push("videos.date_filmed <= ?");
+    params.push(query.date_to);
+  }
+
+  if (query.country) {
+    conditions.push("LOWER(COALESCE(videos.filmed_country, '')) LIKE ?");
+    params.push(`%${String(query.country).trim().toLowerCase()}%`);
+  }
+
+  if (query.city) {
+    conditions.push("LOWER(COALESCE(videos.filmed_city, '')) LIKE ?");
+    params.push(`%${String(query.city).trim().toLowerCase()}%`);
+  }
+
+  return {
+    whereClause: `WHERE ${conditions.join(" AND ")}`,
+    params
+  };
+}
+
 function mapExportVideos(db, videos) {
   if (videos.length === 0) {
     return [];
@@ -218,6 +297,17 @@ function mapExportVideos(db, videos) {
 
 function createPlaceholders(count) {
   return new Array(count).fill("?").join(", ");
+}
+
+function parseCsvList(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 module.exports = router;

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPerson, deletePerson, getPhotos, getVideos, updatePerson } from "../api";
 
+const FEATURED_PEOPLE = ["Adam", "Lindsay", "Lily", "Cora", "Harper"];
+
 export default function PeopleView({ people, refreshPeople }) {
   const [newPersonName, setNewPersonName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -27,6 +29,28 @@ export default function PeopleView({ people, refreshPeople }) {
       setIsCreating(false);
     }
   }
+
+  const sortedPeople = useMemo(() => {
+    const featured = [];
+    const others = [];
+
+    for (const featuredName of FEATURED_PEOPLE) {
+      const person = people.find((entry) => entry.name === featuredName);
+
+      if (person) {
+        featured.push(person);
+      }
+    }
+
+    for (const person of people) {
+      if (!FEATURED_PEOPLE.includes(person.name)) {
+        others.push(person);
+      }
+    }
+
+    others.sort((left, right) => left.name.localeCompare(right.name));
+    return [...featured, ...others];
+  }, [people]);
 
   return (
     <section className="panel flex h-full min-h-0 flex-col overflow-hidden p-6">
@@ -59,7 +83,7 @@ export default function PeopleView({ people, refreshPeople }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="divide-y divide-stone-200 border border-stone-300 bg-white">
-          {people.map((person) => (
+          {sortedPeople.map((person) => (
             <PersonRow
               key={person.id}
               person={person}
