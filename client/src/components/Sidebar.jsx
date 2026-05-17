@@ -3,7 +3,8 @@ const NAV_ITEMS = [
   { id: "people", label: "People" },
   { id: "tags", label: "Tags" },
   { id: "upload", label: "Upload" },
-  { id: "export", label: "Import / Export" }
+  { id: "export", label: "Import / Export" },
+  { id: "settings", label: "Settings" }
 ];
 
 export default function Sidebar({ currentView, onNavigate }) {

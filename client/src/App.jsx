@@ -3,6 +3,7 @@ import { getPeople, getTagGroups, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
 import PeopleView from "./components/PeopleView";
+import SettingsView from "./components/SettingsView";
 import TagsView from "./components/TagsView";
 import TimelineView from "./components/TimelineView";
 import UploadView from "./components/UploadView";
@@ -12,7 +13,8 @@ const VIEW_LABELS = {
   people: "People",
   tags: "Tags",
   upload: "Upload",
-  export: "Import / Export"
+  export: "Import / Export",
+  settings: "Settings"
 };
 
 export default function App() {
@@ -85,7 +87,7 @@ export default function App() {
             </div>
           ) : null}
 
-          {currentView === "export" ? (
+          {currentView === "export" || currentView === "settings" ? (
             <div className="mb-4">
               <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
                 {VIEW_LABELS[currentView]}
@@ -105,6 +107,8 @@ export default function App() {
             />
           ) : currentView === "upload" ? (
             <UploadView onNavigate={setCurrentView} />
+          ) : currentView === "settings" ? (
+            <SettingsView />
           ) : (
             <ExportView people={people} />
           )}

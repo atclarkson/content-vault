@@ -39,10 +39,12 @@ router.post("/video/:id", async (req, res) => {
     }
 
     const enrichedVideo = attachVideoPeopleAndTags(db, video);
+    const captionBio = loadCaptionBio(db);
     const imageBase64 = await fetchImageAsBase64(enrichedVideo.thumbnail_url);
     const prompt = buildVideoCaptionPrompt(enrichedVideo);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
+      captionBio,
       imageBase64,
       prompt,
     );
@@ -120,10 +122,12 @@ router.post("/:id", async (req, res) => {
 
     const enrichedPhoto = attachPeopleAndTags(db, photo);
     const tagTaxonomy = loadTagTaxonomy(db);
+    const captionBio = loadCaptionBio(db);
     const imageBase64 = await fetchImageAsBase64(enrichedPhoto.large_url);
     const prompt = buildCaptionPrompt(enrichedPhoto, tagTaxonomy);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
+      captionBio,
       imageBase64,
       prompt,
     );
@@ -163,12 +167,13 @@ async function fetchImageAsBase64(url) {
   return Buffer.from(arrayBuffer).toString("base64");
 }
 
-async function requestCaptionFromAnthropic(apiKey, imageBase64, prompt) {
+async function requestCaptionFromAnthropic(apiKey, captionBio, imageBase64, prompt) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
+      "anthropic-beta": "prompt-caching-2024-07-31",
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -179,16 +184,23 @@ async function requestCaptionFromAnthropic(apiKey, imageBase64, prompt) {
           role: "user",
           content: [
             {
+              type: "text",
+              text: captionBio || "No caption bio configured.",
+              cache_control: {
+                type: "ephemeral",
+              },
+            },
+            {
+              type: "text",
+              text: prompt,
+            },
+            {
               type: "image",
               source: {
                 type: "base64",
                 media_type: "image/jpeg",
                 data: imageBase64,
               },
-            },
-            {
-              type: "text",
-              text: prompt,
             },
           ],
         },
@@ -215,6 +227,21 @@ async function requestCaptionFromAnthropic(apiKey, imageBase64, prompt) {
   }
 
   return parsedBody;
+}
+
+function loadCaptionBio(db) {
+  const row = db
+    .prepare(
+      `
+    SELECT value
+    FROM settings
+    WHERE key = 'caption_bio'
+    LIMIT 1
+  `,
+    )
+    .get();
+
+  return row?.value ? String(row.value) : "";
 }
 
 function parseAnthropicText(response) {
