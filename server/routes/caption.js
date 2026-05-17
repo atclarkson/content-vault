@@ -40,11 +40,13 @@ router.post("/video/:id", async (req, res) => {
 
     const enrichedVideo = attachVideoPeopleAndTags(db, video);
     const captionBio = loadCaptionBio(db);
+    const tagTaxonomy = loadTagTaxonomy(db);
     const imageBase64 = await fetchImageAsBase64(enrichedVideo.thumbnail_url);
     const prompt = buildVideoCaptionPrompt(enrichedVideo);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
       captionBio,
+      tagTaxonomy,
       imageBase64,
       prompt,
     );
@@ -74,6 +76,7 @@ router.post("/video/:id", async (req, res) => {
         ai_caption: parsedResponse.aiCaption,
         alt_text: nextAltText || null,
         suggested_title: parsedResponse.suggestedTitle || null,
+        suggested_tags: parsedResponse.tagSuggestions || [],
       },
     });
   } catch (error) {
@@ -124,10 +127,11 @@ router.post("/:id", async (req, res) => {
     const tagTaxonomy = loadTagTaxonomy(db);
     const captionBio = loadCaptionBio(db);
     const imageBase64 = await fetchImageAsBase64(enrichedPhoto.large_url);
-    const prompt = buildCaptionPrompt(enrichedPhoto, tagTaxonomy);
+    const prompt = buildCaptionPrompt(enrichedPhoto);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
       captionBio,
+      tagTaxonomy,
       imageBase64,
       prompt,
     );
@@ -167,7 +171,7 @@ async function fetchImageAsBase64(url) {
   return Buffer.from(arrayBuffer).toString("base64");
 }
 
-async function requestCaptionFromAnthropic(apiKey, captionBio, imageBase64, prompt) {
+async function requestCaptionFromAnthropic(apiKey, captionBio, tagTaxonomy, imageBase64, prompt) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -185,7 +189,13 @@ async function requestCaptionFromAnthropic(apiKey, captionBio, imageBase64, prom
           content: [
             {
               type: "text",
-              text: captionBio || "No caption bio configured.",
+              text: [
+                "FAMILY CONTEXT — always apply this to every caption:",
+                captionBio || "No caption bio configured.",
+                "",
+                "TAG TAXONOMY — use these groups and tags as a guide when suggesting tags. Prefer existing tags over inventing new ones:",
+                tagTaxonomy || "No tag taxonomy configured."
+              ].join("\n"),
               cache_control: {
                 type: "ephemeral",
               },
@@ -313,7 +323,7 @@ function parseSuggestedTagsWithGroups(value) {
   return suggestions;
 }
 
-function buildCaptionPrompt(photo, tagTaxonomy) {
+function buildCaptionPrompt(photo) {
   const people = (photo.people || []).map((person) => person.name);
   const tags = photo.tags || [];
   const locationParts = [
@@ -322,49 +332,56 @@ function buildCaptionPrompt(photo, tagTaxonomy) {
     photo.region,
     photo.country,
   ].filter(Boolean);
-  const cameraParts = [photo.camera_make, photo.camera_model].filter(Boolean);
 
   return [
-    "You are writing captions for a personal family travel blog. Write exactly like a real person would — casual, specific, direct.",
+    "You are Adam Clarkson, a travel blogger writing for adamandlinds.com. Write captions in first person plural (we/our) as if speaking directly to your audience. Casual, specific, direct. No fluff.",
     "",
-    "Rules:",
-    "- 1-2 sentences max for the caption",
-    "- Suggest a short, natural title, 4-10 words, not a filename",
-    "- Suggest 3-6 useful tags, lowercase, short, comma-separated, no hashtags",
-    "- Always include one tag describing the shot itself when it can be inferred from the image, for example: overhead shot, wide shot, close up shot, portrait shot, detail shot, street shot",
-    "- Use the tag taxonomy below as a guide when suggesting tags",
-    "- Do not suggest country names or broad place names like china, japan, vietnam, portugal, hong kong, or similar. Location is handled separately.",
-    "- Do not suggest year, month, season, or time tags like fall 2025, winter 2026, summer, spring, or similar. The photo date is already stored separately.",
-    "- Mention people by name, location, and approximate time when available",
-    "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
-    "- Be specific, not generic. Avoid vague positive filler.",
+    "CAPTION RULES:",
+    "- 1-2 sentences max",
+    "- Only mention people who appear in the People list below. If notes mention someone is NOT in the photo, do not mention them at all. The People list is the ground truth.",
+    "- Never invent people, relationships, or actions not supported by the metadata or image",
+    "- Notes are low-priority background context. The caption should primarily come from what you see in the image and the structured metadata above. Do not let notes dominate or dictate the caption.",
+    "- Prefer seasons and approximate time over exact dates. Say 'spring of 2025' not 'April 3, 2025' unless the exact date is unusually meaningful like a birthday",
+    "- If a birthday is evident from the metadata or notes, mention it naturally",
+    "- Be specific, not generic. A bad caption describes the photo. A good caption tells you something about the moment.",
+    "- Write like you were there, as Adam speaking to his audience, not like an outside observer describing a scene",
+    "- When referring to people, use their names or personal terms like 'the girls', 'our family', 'the kids'. Never use cold generic descriptions like 'three girls', 'a family', 'a woman', 'a man', 'a child', or 'two adults'. The difference: 'the girls' is personal, 'three girls' is a stranger describing a photo.",
     "- Never end a sentence with a participial phrase like '...capturing a moment of...' or '...reflecting their...' or '...highlighting the...'",
-    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore",
+    "- Never use em dashes (—). Use a comma, period, or rephrase instead",
+    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore, delve, tapestry, landscape (as abstract noun)",
     "- Never use 'not just X, but Y' or 'more than just' constructions",
-    "- Do not list three things in a row for emphasis",
-    "- Do not editorialize about significance or meaning",
-    "- Never use em dashes (—). Use a comma, period, or rephrase the sentence instead. Em dashes are one of the strongest identifiers of AI-written text.",
-    "- Write like you were there, not like you are describing a photo",
+    "- Do not list three things in a row for emphasis (rule of three is an AI tell)",
+    "- Do not editorialize about significance, legacy, or meaning",
+    "- Do not use words like 'content', 'storytelling', 'narrative', 'authenticity', or 'the viewer'",
     "",
-    "Photo metadata:",
-    `People: ${people.length > 0 ? people.join(", ") : "None listed"}`,
+    "TITLE RULES:",
+    "- 4-8 words, written like a travel blog post title or vlog title",
+    "- Specific and evocative, not generic. 'Harper's Noodle Lunch in Southampton' not 'Lunch Stop in England'",
+    "- Do not use the filename as inspiration",
+    "- Do not use colons or em dashes in the title",
+    "",
+    "TAG RULES:",
+    "- Suggest 3-6 tags using the taxonomy provided in your context",
+    "- Prefer existing tags from the taxonomy over inventing new ones",
+    "- Always include one shot type tag when it can be inferred from the image",
+    "- Do not suggest country names, city names, or broad geographic tags — location is stored separately",
+    "- Do not suggest year, season, or time-based tags — date is stored separately",
+    "- Format as: GroupName>tagname (e.g. Food & Drink>dim sum, Shot Type>wide shot)",
+    "",
+    "PHOTO METADATA:",
+    `People IN this photo: ${people.length > 0 ? people.join(", ") : "None — do not mention any people by name"}`,
     `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
     `Date taken: ${photo.captured_at || "Unknown"}`,
-    `Tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
+    `Existing tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
     `Title: ${photo.title || "Not set"}`,
-    `Description (public context): ${photo.description || "Not set"}`,
-    `Notes for AI (private context): ${photo.notes_for_ai || "Not set"}`,
-    "Use the description as public-facing context the owner has already written.",
-    "Use the notes for AI as private background information that should inform the caption, but never reproduce it word-for-word in the output.",
+    `Description (public, owner-written): ${photo.description || "Not set"}`,
+    `Notes (background context only, low priority): ${photo.notes_for_ai || "Not set"}`,
     "",
-    "Tag taxonomy — when suggesting tags use these groups and example tags as a guide:",
-    tagTaxonomy,
-    "",
-    "Return exactly this format:",
+    "Return exactly this format with no preamble:",
     "AI_CAPTION: <caption here>",
-    "TAG_SUGGESTIONS: <comma-separated Group>tag pairs here>",
-    "ALT_TEXT: <alt text here>",
-    "TITLE_SUGGESTION: <suggested title here>",
+    "TAG_SUGGESTIONS: <comma-separated GroupName>tagname pairs>",
+    "ALT_TEXT: <one sentence describing what is visually in the image for accessibility>",
+    "TITLE_SUGGESTION: <title here>",
   ].join("\n");
 }
 
@@ -404,39 +421,53 @@ function buildVideoCaptionPrompt(video) {
   const locationParts = [video.filmed_city, video.filmed_country].filter(Boolean);
 
   return [
-    "You are writing captions for a personal family travel blog. Write exactly like a real person would, casual, specific, direct.",
+    "You are Adam Clarkson, a travel blogger writing for adamandlinds.com. Write captions in first person plural (we/our) as if speaking directly to your audience. Casual, specific, direct. No fluff.",
     "",
-    "Rules:",
-    "- 1-2 sentences max for the caption",
-    "- Suggest a short, natural title, 4-10 words, not a filename",
-    "- Mention people by name, location, and approximate time when available",
-    "- Prefer seasons and years over exact dates. For example, say 'in the winter of 2026' instead of 'on January 15, 2026' unless an exact date is unusually important.",
-    "- Be specific, not generic. Avoid vague positive filler.",
+    "CAPTION RULES:",
+    "- 1-2 sentences max",
+    "- Only mention people who appear in the People list below. If notes mention someone is NOT in the video, do not mention them at all. The People list is the ground truth.",
+    "- Never invent people, relationships, or actions not supported by the metadata",
+    "- Prefer seasons and approximate time over exact dates. Say 'spring of 2025' not 'April 3, 2025' unless the exact date is unusually meaningful like a birthday",
+    "- If a birthday is evident from the metadata or notes, mention it naturally",
+    "- Be specific, not generic. A bad caption describes the video. A good caption tells you something about the moment.",
+    "- Write like you were there, as Adam speaking to his audience, not like an outside observer describing a scene",
     "- Never end a sentence with a participial phrase like '...capturing a moment of...' or '...reflecting their...' or '...highlighting the...'",
-    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore",
-    "- Do not use AI-sounding wording or talk about 'content', 'storytelling', 'narrative', 'authenticity', or 'the viewer'",
+    "- Never use em dashes (—). Use a comma, period, or rephrase instead",
+    "- Never use: vibrant, nestled, showcasing, highlighting, testament, stunning, beautiful, picturesque, perfect, incredible, amazing, breathtaking, remarkable, pivotal, enduring, foster, underscore, delve, tapestry, landscape (as abstract noun)",
     "- Never use 'not just X, but Y' or 'more than just' constructions",
-    "- Do not list three things in a row for emphasis",
-    "- Do not editorialize about significance or meaning",
-    "- Never use em dashes (—). Use a comma, period, or rephrase the sentence instead. Em dashes are one of the strongest identifiers of AI-written text.",
-    "- Write like you were there, not like you are describing metadata",
+    "- Do not list three things in a row for emphasis (rule of three is an AI tell)",
+    "- Do not editorialize about significance, legacy, or meaning",
+    "- Do not use words like 'content', 'storytelling', 'narrative', 'authenticity', or 'the viewer'",
     "",
-    "Video metadata:",
-    `People: ${people.length > 0 ? people.join(", ") : "None listed"}`,
+    "TITLE RULES:",
+    "- 4-8 words, written like a travel blog post title or vlog title",
+    "- Specific and evocative, not generic",
+    "- Do not use the filename or existing title too literally as inspiration",
+    "- Do not use colons or em dashes in the title",
+    "",
+    "TAG RULES:",
+    "- Suggest 3-6 tags using the taxonomy provided in your context",
+    "- Prefer existing tags from the taxonomy over inventing new ones",
+    "- Do not suggest country names, city names, or broad geographic tags — location is stored separately",
+    "- Do not suggest year, season, or time-based tags — date is stored separately",
+    "- Format as: GroupName>tagname",
+    "",
+    "VIDEO METADATA:",
+    `People IN this video: ${people.length > 0 ? people.join(", ") : "None — do not mention any people by name"}`,
     `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
     `Filmed date: ${video.date_filmed || "Unknown"}`,
     `Published date: ${video.date_published || "Unknown"}`,
-    `Tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
+    `Existing tags: ${tags.length > 0 ? tags.join(", ") : "None"}`,
     `Video category: ${video.video_category || "Unknown"}`,
     `Title: ${video.title || "Not set"}`,
-    `Description: ${video.description || "Not set"}`,
-    `Private notes/context: ${video.notes_for_ai || "Not set"}`,
-    "Use the private notes/context to understand the moment, but do not quote or paraphrase it too literally unless it naturally fits.",
+    `Description (public, owner-written): ${video.description || "Not set"}`,
+    `Notes for AI (private context, never quote verbatim): ${video.notes_for_ai || "Not set"}`,
     "",
-    "Return exactly this format:",
+    "Return exactly this format with no preamble:",
     "AI_CAPTION: <caption here>",
-    "ALT_TEXT: <alt text here>",
-    "TITLE_SUGGESTION: <suggested title here>",
+    "TAG_SUGGESTIONS: <comma-separated GroupName>tagname pairs>",
+    "ALT_TEXT: <one sentence describing what is visually in the image for accessibility>",
+    "TITLE_SUGGESTION: <title here>",
   ].join("\n");
 }
 
