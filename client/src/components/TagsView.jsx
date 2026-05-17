@@ -1,21 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteTag, getTagGroups, mergeTags, updateTag } from "../api";
 
-const TAG_GROUP_COLOR_CLASSES = [
-  "bg-red-500",
-  "bg-orange-500",
-  "bg-yellow-400",
-  "bg-green-500",
-  "bg-blue-500",
-  "bg-purple-500",
-  "bg-pink-500",
-  "bg-gray-300",
-  "bg-gray-600",
-  "bg-[oklch(54.7%_0.021_43.1)]"
-];
-
 function getGroupColorClass(color) {
-  return TAG_GROUP_COLOR_CLASSES.includes(color) ? color : "bg-stone-400";
+  return String(color || "").trim() || "bg-stone-400";
 }
 
 export default function TagsView({ tagGroups: initialTagGroups, refreshTags, refreshTagGroups }) {
