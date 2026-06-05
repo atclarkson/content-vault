@@ -56,7 +56,17 @@ export async function getPhoto(id) {
   return request(`/api/photos/${id}`);
 }
 
-export async function generateCaption(id) {
+export async function generateCaption(id, options = {}) {
+  const notesForAi = typeof options.notes_for_ai === "string" ? options.notes_for_ai : null;
+  const people = Array.isArray(options.people) ? options.people : null;
+
+  if (notesForAi !== null || people !== null) {
+    return jsonRequest(`/api/caption/${id}`, "POST", {
+      ...(notesForAi !== null ? { notes_for_ai: notesForAi } : {}),
+      ...(people !== null ? { people } : {})
+    });
+  }
+
   return request(`/api/caption/${id}`, {
     method: "POST"
   });
@@ -276,13 +286,39 @@ export async function uploadPhotos(files, onProgress) {
     xhr.open("POST", "/api/upload");
     xhr.responseType = "text";
 
+    if (onProgress) {
+      onProgress({
+        phase: "starting",
+        loaded: 0,
+        total: 0,
+        percent: 0
+      });
+    }
+
     xhr.upload.onprogress = (event) => {
       if (!onProgress || !event.lengthComputable) {
         return;
       }
 
-      const percent = Math.round((event.loaded / event.total) * 100);
-      onProgress(percent);
+      onProgress({
+        phase: "uploading",
+        loaded: event.loaded,
+        total: event.total,
+        percent: Math.round((event.loaded / event.total) * 100)
+      });
+    };
+
+    xhr.upload.onload = () => {
+      if (!onProgress) {
+        return;
+      }
+
+      onProgress({
+        phase: "processing",
+        loaded: 0,
+        total: 0,
+        percent: 100
+      });
     };
 
     xhr.onload = () => {
@@ -297,7 +333,12 @@ export async function uploadPhotos(files, onProgress) {
 
       if (xhr.status >= 200 && xhr.status < 300) {
         if (onProgress) {
-          onProgress(100);
+          onProgress({
+            phase: "complete",
+            loaded: 0,
+            total: 0,
+            percent: 100
+          });
         }
 
         resolve(data);

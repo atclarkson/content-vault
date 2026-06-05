@@ -106,11 +106,17 @@ export default function App() {
               refreshTagGroups={refreshTagGroups}
             />
           ) : currentView === "upload" ? (
-            <UploadView onNavigate={setCurrentView} />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <UploadView onNavigate={setCurrentView} />
+            </div>
           ) : currentView === "settings" ? (
-            <SettingsView />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <SettingsView />
+            </div>
           ) : (
-            <ExportView people={people} />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ExportView people={people} />
+            </div>
           )}
         </div>
       </main>

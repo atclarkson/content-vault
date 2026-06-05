@@ -24,9 +24,58 @@ function getMissingCount(photos, field) {
   return 0;
 }
 
-function getExportFilename() {
-  const date = new Date().toISOString().slice(0, 10);
-  return `content-vault-export-${date}.json`;
+function slugifyFilenamePart(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function getExportFilename(filters) {
+  const today = new Date().toISOString().slice(0, 10);
+  const parts = ["content-vault-export"];
+
+  if (filters.date_from && filters.date_to) {
+    parts.push(`${filters.date_from}-to-${filters.date_to}`);
+  } else if (filters.date_from) {
+    parts.push(`from-${filters.date_from}`);
+  } else if (filters.date_to) {
+    parts.push(`to-${filters.date_to}`);
+  }
+
+  if (filters.country) {
+    const countryPart = slugifyFilenamePart(filters.country);
+
+    if (countryPart) {
+      parts.push(countryPart);
+    }
+  }
+
+  if (filters.city) {
+    const cityPart = slugifyFilenamePart(filters.city);
+
+    if (cityPart) {
+      parts.push(cityPart);
+    }
+  }
+
+  if (filters.people) {
+    const peoplePart = String(filters.people)
+      .split(",")
+      .map((person) => slugifyFilenamePart(person))
+      .filter(Boolean);
+
+    if (peoplePart.length > 0) {
+      parts.push(...peoplePart);
+    }
+  }
+
+  parts.push(today);
+
+  return `${parts.join("-")}.json`;
 }
 
 function triggerDownload(data, filename) {
@@ -284,7 +333,7 @@ export default function ExportView({ people }) {
 
     try {
       const response = await exportCatalog(activeExportFilters);
-      triggerDownload(response?.data || {}, getExportFilename());
+      triggerDownload(response?.data || {}, getExportFilename(activeExportFilters));
     } catch (exportError) {
       setError(exportError.message || "Failed to export catalog");
     } finally {
@@ -428,15 +477,16 @@ export default function ExportView({ people }) {
   }
 
   return (
-    <section className="panel p-6">
+    <section className="panel flex h-full min-h-0 flex-col overflow-hidden p-6">
       <div className="mb-6">
         <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Export</p>
         <h2 className="mt-2 text-2xl font-semibold text-stone-900">Catalog export</h2>
       </div>
 
-      {error ? <div className="mb-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-2">
+        {error ? <div className="mb-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-      <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
+        <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
         <div className="flex items-start justify-between gap-6">
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Import Destinations</p>
@@ -497,9 +547,9 @@ export default function ExportView({ people }) {
             {destinationImportError}
           </div>
         ) : null}
-      </div>
+        </div>
 
-      <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
+        <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
         <div className="flex items-start justify-between gap-6">
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Import Day One Journal</p>
@@ -577,9 +627,9 @@ export default function ExportView({ people }) {
             {dayOneImportError}
           </div>
         ) : null}
-      </div>
+        </div>
 
-      <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
+        <div className="mb-8 border border-stone-300 bg-stone-50 p-6">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">YouTube</p>
@@ -625,93 +675,94 @@ export default function ExportView({ people }) {
             {youtubeError}
           </div>
         ) : null}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Total Photos" value={isLoadingStats ? "..." : stats.totalPhotos} />
-        <StatCard label="Total Videos" value={isLoadingVideoStats ? "..." : videoStats.totalVideos} />
-        <StatCard label="Missing Alt Text" value={isLoadingStats ? "..." : stats.missingAltText} />
-        <StatCard label="Missing People" value={isLoadingStats ? "..." : stats.missingPeople} />
-        <StatCard label="Missing Tags" value={isLoadingStats ? "..." : stats.missingTags} />
-      </div>
-
-      <div className="mt-8 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-6">
-        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Export Filters</p>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date From</span>
-            <input
-              type="date"
-              value={exportFilters.date_from}
-              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_from: event.target.value }))}
-              className="field"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date To</span>
-            <input
-              type="date"
-              value={exportFilters.date_to}
-              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_to: event.target.value }))}
-              className="field"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Country</span>
-            <input
-              type="text"
-              value={exportFilters.country}
-              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, country: event.target.value }))}
-              className="field"
-              placeholder="Filter by country"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">City</span>
-            <input
-              type="text"
-              value={exportFilters.city}
-              onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, city: event.target.value }))}
-              className="field"
-              placeholder="Filter by city"
-            />
-          </label>
         </div>
 
-        <div className="mt-5">
-          <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">People</p>
-          <div className="flex flex-wrap gap-3">
-            {people.map((person) => (
-              <label key={person.id} className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700">
-                <input
-                  type="checkbox"
-                  checked={exportFilters.people.includes(person.name)}
-                  onChange={() => toggleExportPerson(person.name)}
-                  className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                />
-                <span>{person.name}</span>
-              </label>
-            ))}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="Total Photos" value={isLoadingStats ? "..." : stats.totalPhotos} />
+          <StatCard label="Total Videos" value={isLoadingVideoStats ? "..." : videoStats.totalVideos} />
+          <StatCard label="Missing Alt Text" value={isLoadingStats ? "..." : stats.missingAltText} />
+          <StatCard label="Missing People" value={isLoadingStats ? "..." : stats.missingPeople} />
+          <StatCard label="Missing Tags" value={isLoadingStats ? "..." : stats.missingTags} />
+        </div>
+
+        <div className="mt-8 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-6">
+          <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Export Filters</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date From</span>
+              <input
+                type="date"
+                value={exportFilters.date_from}
+                onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_from: event.target.value }))}
+                className="field"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Date To</span>
+              <input
+                type="date"
+                value={exportFilters.date_to}
+                onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, date_to: event.target.value }))}
+                className="field"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Country</span>
+              <input
+                type="text"
+                value={exportFilters.country}
+                onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, country: event.target.value }))}
+                className="field"
+                placeholder="Filter by country"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">City</span>
+              <input
+                type="text"
+                value={exportFilters.city}
+                onChange={(event) => setExportFilters((currentValue) => ({ ...currentValue, city: event.target.value }))}
+                className="field"
+                placeholder="Filter by city"
+              />
+            </label>
           </div>
-        </div>
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <button type="button" onClick={handleExport} disabled={isExporting || isLoadingStats} className="btn-primary">
-            {isExporting ? "Preparing Export..." : "Download JSON Export"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setExportFilters({ date_from: "", date_to: "", country: "", city: "", people: [] })}
-            className="btn-secondary"
-          >
-            Clear Filters
-          </button>
-        </div>
+          <div className="mt-5">
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">People</p>
+            <div className="flex flex-wrap gap-3">
+              {people.map((person) => (
+                <label key={person.id} className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700">
+                  <input
+                    type="checkbox"
+                    checked={exportFilters.people.includes(person.name)}
+                    onChange={() => toggleExportPerson(person.name)}
+                    className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                  />
+                  <span>{person.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
-        <p className="mt-4 text-sm text-stone-600">Deleted photos are never included in exports.</p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={handleExport} disabled={isExporting || isLoadingStats} className="btn-primary">
+              {isExporting ? "Preparing Export..." : "Download JSON Export"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportFilters({ date_from: "", date_to: "", country: "", city: "", people: [] })}
+              className="btn-secondary"
+            >
+              Clear Filters
+            </button>
+          </div>
+
+          <p className="mt-4 text-sm text-stone-600">Deleted photos are never included in exports.</p>
+        </div>
       </div>
     </section>
   );

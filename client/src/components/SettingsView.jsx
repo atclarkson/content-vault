@@ -94,42 +94,44 @@ export default function SettingsView() {
   }, []);
 
   return (
-    <section className="panel p-6">
+    <section className="panel flex h-full min-h-0 flex-col overflow-hidden p-6">
       <div className="mb-6">
         <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Settings</p>
         <h2 className="mt-2 text-2xl font-semibold text-stone-900">Caption settings</h2>
       </div>
 
-      {error ? (
-        <div className="mb-6 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-2">
+        {error ? (
+          <div className="mb-6 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
 
-      <section className="border border-stone-300 bg-stone-50 p-6">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Caption Bio</p>
-            <h3 className="mt-2 text-lg font-medium text-stone-900">Who You Are</h3>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-stone-600">
-              This is sent to Claude on every caption call. Include who your family is, travel context, and any background that helps AI write better captions.
-            </p>
+        <section className="border border-stone-300 bg-stone-50 p-6">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Caption Bio</p>
+              <h3 className="mt-2 text-lg font-medium text-stone-900">Who You Are</h3>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-stone-600">
+                This is sent to Claude on every caption call. Include who your family is, travel context, and any background that helps AI write better captions.
+              </p>
+            </div>
+
+            <div className="shrink-0 text-sm text-stone-500">
+              {isSaving ? "Saving..." : saveState === "saved" ? "Saved" : null}
+            </div>
           </div>
 
-          <div className="shrink-0 text-sm text-stone-500">
-            {isSaving ? "Saving..." : saveState === "saved" ? "Saved" : null}
-          </div>
-        </div>
-
-        <textarea
-          value={captionBio}
-          onChange={(event) => setCaptionBio(event.target.value)}
-          rows={10}
-          className="field min-h-[240px] resize-y"
-          placeholder={isLoading ? "Loading settings..." : "Describe your family, travel style, writing voice, and any context Claude should know."}
-          disabled={isLoading}
-        />
-      </section>
+          <textarea
+            value={captionBio}
+            onChange={(event) => setCaptionBio(event.target.value)}
+            rows={10}
+            className="field min-h-[240px] resize-y"
+            placeholder={isLoading ? "Loading settings..." : "Describe your family, travel style, writing voice, and any context Claude should know."}
+            disabled={isLoading}
+          />
+        </section>
+      </div>
     </section>
   );
 }

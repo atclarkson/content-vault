@@ -95,6 +95,8 @@ router.post("/:id", async (req, res) => {
     const db = getDb();
     const photoId = normalizeSingleId(req.params.id);
     const apiKey = process.env.ANTHROPIC_API_KEY;
+    const notesForAiOverride = normalizeOptionalString(req.body?.notes_for_ai);
+    const peopleOverrideIds = normalizeOptionalIdArray(req.body?.people);
 
     if (!apiKey) {
       return res
@@ -124,10 +126,27 @@ router.post("/:id", async (req, res) => {
     }
 
     const enrichedPhoto = attachPeopleAndTags(db, photo);
+    let promptPhoto = enrichedPhoto;
+
+    if (notesForAiOverride !== null) {
+      promptPhoto = {
+        ...promptPhoto,
+        notes_for_ai: notesForAiOverride
+      };
+    }
+
+    if (peopleOverrideIds !== null) {
+      promptPhoto = {
+        ...promptPhoto,
+        people: loadPeopleByIds(db, peopleOverrideIds)
+      };
+    }
+
     const tagTaxonomy = loadTagTaxonomy(db);
     const captionBio = loadCaptionBio(db);
-    const imageBase64 = await fetchImageAsBase64(enrichedPhoto.large_url);
-    const prompt = buildCaptionPrompt(enrichedPhoto);
+    const captionMemory = loadRecentCaptionMemory(db, photoId);
+    const imageBase64 = await fetchImageAsBase64(promptPhoto.large_url);
+    const prompt = buildCaptionPrompt(promptPhoto, captionMemory);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
       captionBio,
@@ -146,7 +165,10 @@ router.post("/:id", async (req, res) => {
         ai_caption: parsedResponse.aiCaption,
         alt_text: parsedResponse.altText || null,
         suggested_title: parsedResponse.suggestedTitle || null,
+        suggested_people: parsedResponse.peopleSuggestions || [],
         suggested_tags: parsedResponse.tagSuggestions || [],
+        notes_for_ai_used: promptPhoto.notes_for_ai || "",
+        people_used: (promptPhoto.people || []).map((person) => person.id),
       },
     });
   } catch (error) {
@@ -262,13 +284,16 @@ function parseAnthropicText(response) {
     .trim();
 
   const aiCaptionMatch = text.match(
-    /AI_CAPTION:\s*([\s\S]*?)(?:\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
+    /AI_CAPTION:\s*([\s\S]*?)(?:\nPEOPLE_SUGGESTIONS:|\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
   );
   const altTextMatch = text.match(
-    /ALT_TEXT:\s*([\s\S]*?)(?:\nTAG_SUGGESTIONS:|\nTITLE_SUGGESTION:|$)/i,
+    /ALT_TEXT:\s*([\s\S]*?)(?:\nPEOPLE_SUGGESTIONS:|\nTAG_SUGGESTIONS:|\nTITLE_SUGGESTION:|$)/i,
   );
   const tagSuggestionsMatch = text.match(
-    /TAG_SUGGESTIONS:\s*([\s\S]*?)(?:\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
+    /TAG_SUGGESTIONS:\s*([\s\S]*?)(?:\nPEOPLE_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
+  );
+  const peopleSuggestionsMatch = text.match(
+    /PEOPLE_SUGGESTIONS:\s*([\s\S]*?)(?:\nAI_CAPTION:|\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
   );
   const titleSuggestionMatch = text.match(/TITLE_SUGGESTION:\s*([\s\S]*?)$/i);
 
@@ -277,6 +302,9 @@ function parseAnthropicText(response) {
     altText: cleanGeneratedText(altTextMatch ? altTextMatch[1] : ""),
     suggestedTitle: cleanGeneratedText(
       titleSuggestionMatch ? titleSuggestionMatch[1] : "",
+    ),
+    peopleSuggestions: parseSuggestedPeople(
+      peopleSuggestionsMatch ? peopleSuggestionsMatch[1] : "",
     ),
     tagSuggestions: parseSuggestedTagsWithGroups(
       tagSuggestionsMatch ? tagSuggestionsMatch[1] : "",
@@ -323,7 +351,32 @@ function parseSuggestedTagsWithGroups(value) {
   return suggestions;
 }
 
-function buildCaptionPrompt(photo) {
+function parseSuggestedPeople(value) {
+  const allowedPeople = ["Adam", "Lindsay", "Lily", "Cora", "Harper"];
+  const suggestions = [];
+  const seen = new Set();
+
+  for (const item of String(value || "").split(",")) {
+    const trimmedItem = item.trim();
+
+    if (!trimmedItem) {
+      continue;
+    }
+
+    const matchingName = allowedPeople.find((name) => name.toLowerCase() === trimmedItem.toLowerCase());
+
+    if (!matchingName || seen.has(matchingName)) {
+      continue;
+    }
+
+    seen.add(matchingName);
+    suggestions.push(matchingName);
+  }
+
+  return suggestions;
+}
+
+function buildCaptionPrompt(photo, captionMemory) {
   const people = (photo.people || []).map((person) => person.name);
   const tags = photo.tags || [];
   const locationParts = [
@@ -368,6 +421,13 @@ function buildCaptionPrompt(photo) {
     "- Do not suggest year, season, or time-based tags — date is stored separately",
     "- Format as: GroupName>tagname (e.g. Food & Drink>dim sum, Shot Type>wide shot)",
     "",
+    "PEOPLE SUGGESTION RULES:",
+    "- Suggest only from this exact list: Adam, Lindsay, Lily, Cora, Harper",
+    "- Only suggest a person if the image gives a reasonable visual basis for it",
+    "- If you are unsure, leave them out",
+    "- Never suggest anyone outside that list",
+    "- Format as a comma-separated list of names, or leave blank if uncertain",
+    "",
     "PHOTO METADATA:",
     `People IN this photo: ${people.length > 0 ? people.join(", ") : "None — do not mention any people by name"}`,
     `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
@@ -377,7 +437,11 @@ function buildCaptionPrompt(photo) {
     `Description (public, owner-written): ${photo.description || "Not set"}`,
     `Notes (background context only, low priority): ${photo.notes_for_ai || "Not set"}`,
     "",
+    "RECENT CAPTION MEMORY:",
+    captionMemory || "No recent caption memory available.",
+    "",
     "Return exactly this format with no preamble:",
+    "PEOPLE_SUGGESTIONS: <comma-separated names from the allowed list, or blank>",
     "AI_CAPTION: <caption here>",
     "TAG_SUGGESTIONS: <comma-separated GroupName>tagname pairs>",
     "ALT_TEXT: <one sentence describing what is visually in the image for accessibility>",
@@ -413,6 +477,32 @@ function loadTagTaxonomy(db) {
   });
 
   return lines.length > 0 ? lines.join("\n") : "No tag groups configured yet.";
+}
+
+function loadRecentCaptionMemory(db, currentPhotoId) {
+  const rows = db.prepare(`
+    SELECT original_filename, ai_caption, title, captured_at, city, country
+    FROM photos
+    WHERE deleted_at IS NULL
+      AND id != ?
+      AND NULLIF(TRIM(COALESCE(ai_caption, '')), '') IS NOT NULL
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 8
+  `).all(currentPhotoId);
+
+  if (rows.length === 0) {
+    return "";
+  }
+
+  return rows.map((row, index) => {
+    const meta = [
+      row.title ? `title=${row.title}` : null,
+      row.captured_at ? `date=${row.captured_at}` : null,
+      row.city || row.country ? `location=${[row.city, row.country].filter(Boolean).join(", ")}` : null
+    ].filter(Boolean).join(" | ");
+
+    return `${index + 1}. ${row.original_filename}${meta ? ` [${meta}]` : ""}: ${row.ai_caption}`;
+  }).join("\n");
 }
 
 function buildVideoCaptionPrompt(video) {
@@ -535,6 +625,30 @@ function attachVideoPeopleAndTags(db, video) {
   };
 }
 
+function loadPeopleByIds(db, peopleIds) {
+  if (peopleIds.length === 0) {
+    return [];
+  }
+
+  const placeholders = peopleIds.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT id, name
+    FROM people
+    WHERE id IN (${placeholders})
+    ORDER BY name
+  `).all(...peopleIds);
+
+  const rowIds = new Set(rows.map((row) => row.id));
+
+  for (const personId of peopleIds) {
+    if (!rowIds.has(personId)) {
+      throw new Error("One or more selected people were not found");
+    }
+  }
+
+  return rows;
+}
+
 function normalizeSingleId(value) {
   const id = Number(value);
 
@@ -553,6 +667,48 @@ function normalizeVideoId(value) {
   }
 
   return id;
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (value === null) {
+    return "";
+  }
+
+  return String(value);
+}
+
+function normalizeOptionalIdArray(value) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("people must be an array");
+  }
+
+  const ids = [];
+  const seen = new Set();
+
+  for (const item of value) {
+    const id = Number(item);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("people must contain valid ids");
+    }
+
+    if (seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    ids.push(id);
+  }
+
+  return ids;
 }
 
 module.exports = router;

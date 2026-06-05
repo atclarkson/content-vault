@@ -123,12 +123,21 @@ function getStatusLabel(status) {
   return "Waiting";
 }
 
+function buildEmptyProgressState() {
+  return {
+    phase: "idle",
+    percent: 0,
+    loaded: 0,
+    total: 0
+  };
+}
+
 export default function UploadView({ onNavigate }) {
   const inputRef = useRef(null);
   const [fileEntries, setFileEntries] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progressState, setProgressState] = useState(buildEmptyProgressState);
   const [error, setError] = useState("");
 
   const totalFilesSize = useMemo(
@@ -136,6 +145,19 @@ export default function UploadView({ onNavigate }) {
     [fileEntries]
   );
   const hasCompletedUpload = fileEntries.length > 0 && !isUploading;
+  const statusCounts = useMemo(() => {
+    return fileEntries.reduce((counts, entry) => {
+      counts[entry.status] = (counts[entry.status] || 0) + 1;
+      return counts;
+    }, { waiting: 0, uploading: 0, done: 0, duplicate: 0, error: 0 });
+  }, [fileEntries]);
+  const activeStatusLabel = progressState.phase === "uploading"
+    ? `Uploading ${formatFileSize(progressState.loaded)} of ${formatFileSize(progressState.total)}`
+    : progressState.phase === "processing"
+      ? "Upload transfer finished. Server is importing, hashing, and processing your files."
+      : progressState.phase === "complete"
+        ? "Upload finished."
+        : "Preparing upload...";
 
   function openFilePicker() {
     inputRef.current?.click();
@@ -155,7 +177,7 @@ export default function UploadView({ onNavigate }) {
 
     setFileEntries(nextEntries);
     setIsUploading(true);
-    setProgress(0);
+    setProgressState(buildEmptyProgressState());
     setError("");
 
     try {
@@ -165,7 +187,7 @@ export default function UploadView({ onNavigate }) {
         message: "Uploading now"
       })));
 
-      const response = await uploadPhotos(mergedFiles, setProgress);
+      const response = await uploadPhotos(mergedFiles, setProgressState);
       const resultEntries = flattenUploadResults(response?.data, mergedFiles);
 
       setFileEntries((currentEntries) => currentEntries.map((entry, index) => ({
@@ -205,12 +227,12 @@ export default function UploadView({ onNavigate }) {
   function resetUploadState() {
     setFileEntries([]);
     setError("");
-    setProgress(0);
+    setProgressState(buildEmptyProgressState());
     setIsDragging(false);
   }
 
   return (
-    <section className="panel p-6">
+    <section className="panel flex h-full min-h-0 flex-col overflow-hidden p-6">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
             <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Upload</p>
@@ -263,52 +285,70 @@ export default function UploadView({ onNavigate }) {
         <p className="mt-2 text-xs uppercase tracking-[0.24em] text-stone-500">Upload starts automatically</p>
       </button>
 
-      {fileEntries.length > 0 ? (
-        <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Batch status</p>
-            <button type="button" onClick={resetUploadState} className="text-sm text-stone-500 hover:text-stone-900">
-              Upload More
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {fileEntries.map((entry) => (
-              <div
-                key={entry.key}
-                className="flex items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-stone-800">{entry.filename}</p>
-                  <p className="mt-1 text-xs text-stone-500">{entry.sizeLabel}</p>
-                  {entry.message ? <p className="mt-1 text-xs text-stone-500">{entry.message}</p> : null}
-                </div>
-
-                <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${getStatusClasses(entry.status)}`}>
-                  <span className={entry.status === "uploading" ? "inline-block h-2 w-2 rounded-full bg-current animate-pulse" : ""}>
-                    {entry.status === "done" ? "✓" : ""}
-                  </span>
-                  <span>{getStatusLabel(entry.status)}</span>
-                </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-2">
+        {isUploading ? (
+          <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Live Upload Status</p>
+                <p className="mt-2 text-sm text-stone-700">{activeStatusLabel}</p>
               </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <StatusPill label="Queued" value={statusCounts.waiting} />
+                <StatusPill label="Uploading" value={statusCounts.uploading} />
+                <StatusPill label="Done" value={statusCounts.done} />
+                <StatusPill label="Duplicates" value={statusCounts.duplicate} />
+                <StatusPill label="Errors" value={statusCounts.error} />
+              </div>
+            </div>
 
-      {isUploading ? (
-        <div className="mt-6">
-          <div className="mb-2 flex items-center justify-between text-sm text-stone-600">
-            <span>Uploading...</span>
-            <span>{progress}%</span>
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between text-sm text-stone-600">
+                <span>{progressState.phase === "processing" ? "Server processing" : "Transfer progress"}</span>
+                <span>{progressState.percent}%</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-stone-200">
+                <div className="h-full rounded-full bg-stone-900 transition-all" style={{ width: `${progressState.percent}%` }} />
+              </div>
+            </div>
           </div>
-          <div className="h-3 overflow-hidden rounded-full bg-stone-200">
-            <div className="h-full rounded-full bg-stone-900 transition-all" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {error ? <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+        {fileEntries.length > 0 ? (
+          <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Batch status</p>
+              <button type="button" onClick={resetUploadState} className="text-sm text-stone-500 hover:text-stone-900">
+                Upload More
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {fileEntries.map((entry) => (
+                <div
+                  key={entry.key}
+                  className="flex items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-stone-800">{entry.filename}</p>
+                    <p className="mt-1 text-xs text-stone-500">{entry.sizeLabel}</p>
+                    {entry.message ? <p className="mt-1 text-xs text-stone-500">{entry.message}</p> : null}
+                  </div>
+
+                  <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${getStatusClasses(entry.status)}`}>
+                    <span className={entry.status === "uploading" ? "inline-block h-2 w-2 rounded-full bg-current animate-pulse" : ""}>
+                      {entry.status === "done" ? "✓" : ""}
+                    </span>
+                    <span>{getStatusLabel(entry.status)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {error ? <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+      </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
         <button type="button" onClick={resetUploadState} className="btn-secondary" disabled={isUploading}>
@@ -320,5 +360,13 @@ export default function UploadView({ onNavigate }) {
         </button>
       </div>
     </section>
+  );
+}
+
+function StatusPill({ label, value }) {
+  return (
+    <span className="rounded-full border border-stone-300 bg-white px-3 py-1.5 text-stone-700">
+      {label}: {value}
+    </span>
   );
 }

@@ -7,6 +7,7 @@ import {
   updatePhoto,
   uploadPhotos
 } from "../api";
+import AnalyzeQueueModal from "./AnalyzeQueueModal";
 import BulkActionBar from "./BulkActionBar";
 import PhotoEditor from "./PhotoEditor";
 import PhotoFilters from "./PhotoFilters";
@@ -147,6 +148,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [activeDropZone, setActiveDropZone] = useState("");
   const [isUploadingToDestination, setIsUploadingToDestination] = useState(false);
   const [expandedJournalEntryIds, setExpandedJournalEntryIds] = useState(new Set());
+  const [isAnalyzeQueueOpen, setIsAnalyzeQueueOpen] = useState(false);
+  const [analyzeQueueOrder, setAnalyzeQueueOrder] = useState("newest");
   const contentScrollRef = useRef(null);
 
   function syncLoadedPhotos(nextPhotos, { resetSelection = false } = {}) {
@@ -507,6 +510,16 @@ export default function TimelineView({ people, tags, tagGroups }) {
     showNoContentDestinations
   ]);
 
+  const analyzeQueuePhotos = useMemo(() => {
+    const pendingPhotos = visiblePhotosInOrder.filter((photo) => isPhotoPendingAnalyze(photo));
+
+    if (analyzeQueueOrder === sortDirection) {
+      return pendingPhotos;
+    }
+
+    return [...pendingPhotos].reverse();
+  }, [analyzeQueueOrder, sortDirection, visiblePhotosInOrder]);
+
   function navigateEditingPhoto(direction) {
     if (!editingPhoto || visiblePhotosInOrder.length === 0) {
       return;
@@ -529,7 +542,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
+    <>
+      <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <PhotoFilters
           people={people}
@@ -588,6 +602,34 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   ))}
                 </div>
               </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-[0.24em] text-stone-500">Analyze</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAnalyzeQueueOrder("newest")}
+                  className={analyzeQueueOrder === "newest" ? "btn-primary" : "btn-secondary"}
+                >
+                  Newest First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnalyzeQueueOrder("oldest")}
+                  className={analyzeQueueOrder === "oldest" ? "btn-primary" : "btn-secondary"}
+                >
+                  Oldest First
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAnalyzeQueueOpen(true)}
+                disabled={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0}
+                className={`mt-2 ${contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "btn-secondary opacity-50" : "btn-primary"}`}
+              >
+                Analyze Queue ({analyzeQueuePhotos.length})
+              </button>
             </div>
           </div>
         </section>
@@ -881,8 +923,47 @@ export default function TimelineView({ people, tags, tagGroups }) {
           />
         )}
       </div>
-    </div>
+      </div>
+
+      <AnalyzeQueueModal
+        isOpen={isAnalyzeQueueOpen}
+        photos={analyzeQueuePhotos}
+        people={people}
+        tags={tags}
+        tagGroups={tagGroups}
+        onClose={() => setIsAnalyzeQueueOpen(false)}
+        onPhotoUpdated={handleSavedPhoto}
+      />
+    </>
   );
+}
+
+function isPhotoPendingAnalyze(photo) {
+  if (!photo || photo.deleted_at) {
+    return false;
+  }
+
+  if (!photo.large_url) {
+    return false;
+  }
+
+  if (photo.processing_status === "queued" || photo.processing_status === "processing" || photo.processing_status === "failed") {
+    return false;
+  }
+
+  if (!String(photo.title || "").trim()) {
+    return true;
+  }
+
+  if (!String(photo.ai_caption || "").trim()) {
+    return true;
+  }
+
+  if (!String(photo.alt_text || "").trim()) {
+    return true;
+  }
+
+  return !Array.isArray(photo.tags) || photo.tags.length === 0;
 }
 
 function DestinationDropZone({ destination, isActive, isUploading, onDragEnter, onDragLeave, onDropFiles }) {
