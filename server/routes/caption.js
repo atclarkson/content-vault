@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb, initializeDatabase } = require("../lib/db");
+const { normalizeEditRecipe } = require("../lib/photoCorrection");
 
 const router = express.Router();
 
@@ -160,6 +161,19 @@ router.post("/:id", async (req, res) => {
       throw new Error("Anthropic response did not include a caption");
     }
 
+    const normalizedEditRecipe = normalizeEditRecipe(parsedResponse.editRecipe);
+
+    db.prepare(`
+      UPDATE photos
+      SET edit_recipe_json = ?,
+          correction_status = ?
+      WHERE id = ?
+    `).run(
+      normalizedEditRecipe ? JSON.stringify(normalizedEditRecipe) : null,
+      normalizedEditRecipe ? "suggested" : "none",
+      photoId
+    );
+
     return res.json({
       data: {
         ai_caption: parsedResponse.aiCaption,
@@ -167,6 +181,7 @@ router.post("/:id", async (req, res) => {
         suggested_title: parsedResponse.suggestedTitle || null,
         suggested_people: parsedResponse.peopleSuggestions || [],
         suggested_tags: parsedResponse.tagSuggestions || [],
+        edit_recipe: normalizedEditRecipe,
         notes_for_ai_used: promptPhoto.notes_for_ai || "",
         people_used: (promptPhoto.people || []).map((person) => person.id),
       },
@@ -295,6 +310,9 @@ function parseAnthropicText(response) {
   const peopleSuggestionsMatch = text.match(
     /PEOPLE_SUGGESTIONS:\s*([\s\S]*?)(?:\nAI_CAPTION:|\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
   );
+  const editRecipeMatch = text.match(
+    /EDIT_RECIPE_JSON:\s*([\s\S]*?)(?:\nPEOPLE_SUGGESTIONS:|\nAI_CAPTION:|\nTAG_SUGGESTIONS:|\nALT_TEXT:|\nTITLE_SUGGESTION:|$)/i,
+  );
   const titleSuggestionMatch = text.match(/TITLE_SUGGESTION:\s*([\s\S]*?)$/i);
 
   return {
@@ -306,6 +324,7 @@ function parseAnthropicText(response) {
     peopleSuggestions: parseSuggestedPeople(
       peopleSuggestionsMatch ? peopleSuggestionsMatch[1] : "",
     ),
+    editRecipe: parseEditRecipe(editRecipeMatch ? editRecipeMatch[1] : ""),
     tagSuggestions: parseSuggestedTagsWithGroups(
       tagSuggestionsMatch ? tagSuggestionsMatch[1] : "",
     ),
@@ -376,6 +395,20 @@ function parseSuggestedPeople(value) {
   return suggestions;
 }
 
+function parseEditRecipe(value) {
+  const trimmedValue = String(value || "").trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return null;
+  }
+}
+
 function buildCaptionPrompt(photo, captionMemory) {
   const people = (photo.people || []).map((person) => person.name);
   const tags = photo.tags || [];
@@ -428,6 +461,16 @@ function buildCaptionPrompt(photo, captionMemory) {
     "- Never suggest anyone outside that list",
     "- Format as a comma-separated list of names, or leave blank if uncertain",
     "",
+    "PHOTO CORRECTION RULES:",
+    "- Return a conservative Sharp correction recipe only",
+    "- This is for mild cleanup, not artistic editing",
+    "- Do not invent crop, object removal, sky replacement, or beauty retouching",
+    "- rotateDegrees must stay 0 for now",
+    "- crop must always be null for now",
+    "- Keep notes short",
+    "- Use this exact JSON shape and keys",
+    `- Allowed values: {"apply": boolean, "brightness": 0.92-1.12, "contrast": 0.90-1.18, "saturation": 0.90-1.18, "sharpness": "none"|"light"|"medium", "warmth": -0.08 to 0.08, "rotateDegrees": 0, "crop": null, "notes": "short explanation"}`,
+    "",
     "PHOTO METADATA:",
     `People IN this photo: ${people.length > 0 ? people.join(", ") : "None — do not mention any people by name"}`,
     `Location: ${locationParts.length > 0 ? locationParts.join(", ") : "Unknown"}`,
@@ -441,6 +484,7 @@ function buildCaptionPrompt(photo, captionMemory) {
     captionMemory || "No recent caption memory available.",
     "",
     "Return exactly this format with no preamble:",
+    'EDIT_RECIPE_JSON: {"apply":false,"brightness":1,"contrast":1,"saturation":1,"sharpness":"none","warmth":0,"rotateDegrees":0,"crop":null,"notes":""}',
     "PEOPLE_SUGGESTIONS: <comma-separated names from the allowed list, or blank>",
     "AI_CAPTION: <caption here>",
     "TAG_SUGGESTIONS: <comma-separated GroupName>tagname pairs>",

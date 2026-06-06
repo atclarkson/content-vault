@@ -4,6 +4,7 @@ const os = require("os");
 const fs = require("fs");
 const crypto = require("crypto");
 const sharp = require("sharp");
+const { applyEditRecipeToSharp } = require("./photoCorrection");
 
 const RAW_EXTENSIONS = new Set([
   ".cr2",
@@ -47,9 +48,8 @@ function validateExtension(originalFilename) {
   }
 }
 
-async function createDerivative(buffer, width) {
-  return sharp(buffer)
-    .rotate()
+async function createDerivative(buffer, width, editRecipe = null) {
+  return applyEditRecipeToSharp(sharp(buffer), editRecipe)
     .resize({
       width,
       fit: "inside",
@@ -91,10 +91,15 @@ async function convertHeicWithSips(buffer) {
   }
 }
 
-async function processImage(buffer, originalFilename) {
+async function createPreviewDerivative(buffer, width, editRecipe = null) {
+  return createDerivative(buffer, width, editRecipe);
+}
+
+async function processImage(buffer, originalFilename, options = {}) {
   validateExtension(originalFilename);
   const extension = getNormalizedExtension(originalFilename);
   let workingBuffer = buffer;
+  const editRecipe = options.editRecipe || null;
 
   if (extension === ".heic" || extension === ".heif") {
     workingBuffer = await convertHeicWithSips(buffer);
@@ -104,9 +109,9 @@ async function processImage(buffer, originalFilename) {
   const exif = await image.metadata();
 
   const [thumbnail, small, large] = await Promise.all([
-    createDerivative(workingBuffer, 200),
-    createDerivative(workingBuffer, 400),
-    createDerivative(workingBuffer, 1000)
+    createDerivative(workingBuffer, 200, editRecipe),
+    createDerivative(workingBuffer, 400, editRecipe),
+    createDerivative(workingBuffer, 1000, editRecipe)
   ]);
 
   return {
@@ -122,3 +127,4 @@ async function processImage(buffer, originalFilename) {
 }
 
 module.exports = processImage;
+module.exports.createPreviewDerivative = createPreviewDerivative;

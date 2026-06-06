@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { appendPhotoVersion } from "../photoUrls";
 
 const SORT_OPTIONS = [
   { id: "newest", label: "Newest First" },
@@ -227,7 +228,7 @@ export default function PhotoGrid({
                   <div className="relative aspect-[4/3] overflow-hidden bg-stone-200">
                     {photo.thumbnail_url ? (
                       <img
-                        src={photo.thumbnail_url}
+                        src={appendPhotoVersion(photo.thumbnail_url, photo)}
                         alt={photo.alt_text || photo.original_filename || "Photo thumbnail"}
                         draggable="false"
                         className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"

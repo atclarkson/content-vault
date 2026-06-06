@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { generateCaption, updatePhoto } from "../api";
+import { generateCaption, getPhotoCorrectionPreview, updatePhoto } from "../api";
 import PeopleSelector from "./PeopleSelector";
 
 function normalizeTagKey(value) {
@@ -42,6 +42,7 @@ function buildSuggestionState(suggestions, photo, knownTags, tagGroups) {
 
   return {
     people: suggestions.people || [],
+    editRecipe: suggestions.editRecipe || null,
     title: suggestions.title || "",
     aiCaption: suggestions.aiCaption || "",
     altText: suggestions.altText || "",
@@ -65,6 +66,7 @@ function buildDefaultFieldSelection(suggestionState, notesChanged) {
   return {
     notes: notesChanged,
     people: suggestionState.people.length > 0,
+    photoCorrection: Boolean(suggestionState.editRecipe?.apply),
     title: Boolean(suggestionState.title),
     aiCaption: Boolean(suggestionState.aiCaption),
     altText: Boolean(suggestionState.altText),
@@ -136,6 +138,14 @@ function areIdListsEqual(left, right) {
   return true;
 }
 
+function buildRecipeCacheKey(photoId, editRecipe) {
+  if (!photoId || !editRecipe) {
+    return "";
+  }
+
+  return `${photoId}:${JSON.stringify(editRecipe)}`;
+}
+
 export default function AnalyzeQueueModal({
   isOpen,
   photos,
@@ -150,6 +160,7 @@ export default function AnalyzeQueueModal({
   const [fieldSelection, setFieldSelection] = useState({
     notes: false,
     people: false,
+    photoCorrection: false,
     title: false,
     aiCaption: false,
     altText: false,
@@ -162,12 +173,18 @@ export default function AnalyzeQueueModal({
   const [error, setError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [history, setHistory] = useState([]);
+  const [correctionPreviewByKey, setCorrectionPreviewByKey] = useState({});
   const analysisByPhotoIdRef = useRef({});
   const wasOpenRef = useRef(false);
+  const correctionPreviewByKeyRef = useRef({});
 
   useEffect(() => {
     analysisByPhotoIdRef.current = analysisByPhotoId;
   }, [analysisByPhotoId]);
+
+  useEffect(() => {
+    correctionPreviewByKeyRef.current = correctionPreviewByKey;
+  }, [correctionPreviewByKey]);
 
   function logQueueEvent(message, details = {}) {
     const entry = {
@@ -196,11 +213,32 @@ export default function AnalyzeQueueModal({
     setError("");
     setActivityLog([]);
     setHistory([]);
+    setCorrectionPreviewByKey((currentValue) => {
+      Object.values(currentValue).forEach((entry) => {
+        if (entry?.url) {
+          URL.revokeObjectURL(entry.url);
+        }
+      });
+
+      return {};
+    });
+    correctionPreviewByKeyRef.current = {};
     console.info("[AnalyzeQueue] opened", {
       queueLength: photos.length,
       photoIds: photos.map((photo) => photo.id),
     });
   }, [isOpen, photos]);
+
+  useEffect(
+    () => () => {
+      Object.values(correctionPreviewByKeyRef.current).forEach((entry) => {
+        if (entry?.url) {
+          URL.revokeObjectURL(entry.url);
+        }
+      });
+    },
+    [],
+  );
 
   const currentPhoto = queue[0] || null;
   const nextPhoto = queue[1] || null;
@@ -233,6 +271,16 @@ export default function AnalyzeQueueModal({
       tagGroups,
     );
   }, [currentAnalysis?.suggestions, currentPhoto, tagGroups, tags]);
+  const currentCorrectionPreviewKey = buildRecipeCacheKey(
+    currentPhoto?.id,
+    currentSuggestionState?.editRecipe,
+  );
+  const currentCorrectionPreview =
+    correctionPreviewByKey[currentCorrectionPreviewKey] || null;
+  const correctionPreviewUrl = currentCorrectionPreview?.url || "";
+  const isLoadingCorrectionPreview =
+    currentCorrectionPreview?.status === "loading";
+  const correctionPreviewError = currentCorrectionPreview?.error || "";
 
   useEffect(() => {
     if (!currentPhoto) {
@@ -240,6 +288,7 @@ export default function AnalyzeQueueModal({
       setFieldSelection({
         notes: false,
         people: false,
+        photoCorrection: false,
         title: false,
         aiCaption: false,
         altText: false,
@@ -268,6 +317,7 @@ export default function AnalyzeQueueModal({
       }
 
       return {
+        photoCorrection: false,
         title: false,
         aiCaption: false,
         altText: false,
@@ -309,6 +359,112 @@ export default function AnalyzeQueueModal({
     notesForAi,
   ]);
 
+  async function ensureCorrectionPreview(photo, editRecipe, reason) {
+    const cacheKey = buildRecipeCacheKey(photo?.id, editRecipe);
+
+    if (!cacheKey) {
+      return null;
+    }
+
+    const existingPreview = correctionPreviewByKeyRef.current[cacheKey];
+
+    if (existingPreview?.status === "done" || existingPreview?.status === "loading") {
+      return existingPreview;
+    }
+
+    logQueueEvent(`Starting correction preview for ${photo.original_filename}`, {
+      photoId: photo.id,
+      reason,
+    });
+
+    correctionPreviewByKeyRef.current = {
+      ...correctionPreviewByKeyRef.current,
+      [cacheKey]: {
+        status: "loading",
+        url: existingPreview?.url || "",
+        error: "",
+      },
+    };
+
+    setCorrectionPreviewByKey((currentValue) => ({
+      ...currentValue,
+      [cacheKey]: {
+        status: "loading",
+        url: currentValue[cacheKey]?.url || "",
+        error: "",
+      },
+    }));
+
+    try {
+      const blob = await getPhotoCorrectionPreview(photo.id, editRecipe, {
+        previewWidth: 520,
+      });
+      const objectUrl = URL.createObjectURL(blob);
+
+      correctionPreviewByKeyRef.current = {
+        ...correctionPreviewByKeyRef.current,
+        [cacheKey]: {
+          status: "done",
+          url: objectUrl,
+          error: "",
+        },
+      };
+
+      setCorrectionPreviewByKey((currentValue) => {
+        const existingValue = currentValue[cacheKey];
+
+        if (existingValue?.url) {
+          URL.revokeObjectURL(existingValue.url);
+        }
+
+        return {
+          ...currentValue,
+          [cacheKey]: {
+            status: "done",
+            url: objectUrl,
+            error: "",
+          },
+        };
+      });
+
+      logQueueEvent(`Finished correction preview for ${photo.original_filename}`, {
+        photoId: photo.id,
+        reason,
+      });
+
+      return { status: "done", url: objectUrl, error: "" };
+    } catch (previewError) {
+      const message =
+        previewError.message || "Failed to load correction preview";
+
+      correctionPreviewByKeyRef.current = {
+        ...correctionPreviewByKeyRef.current,
+        [cacheKey]: {
+          status: "error",
+          url: "",
+          error: message,
+        },
+      };
+
+      setCorrectionPreviewByKey((currentValue) => ({
+        ...currentValue,
+        [cacheKey]: {
+          status: "error",
+          url: "",
+          error: message,
+        },
+      }));
+
+      logQueueEvent(`Correction preview failed for ${photo.original_filename}`, {
+        photoId: photo.id,
+        reason,
+        error: message,
+      });
+
+      return null;
+    }
+  }
+
   useEffect(() => {
     if (!isOpen || !currentPhoto) {
       return;
@@ -340,6 +496,29 @@ export default function AnalyzeQueueModal({
       });
     }
   }, [isOpen, queue]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const previewCandidates = [currentPhoto, ...prefetchedPhotos].filter(Boolean);
+
+    for (const [index, photo] of previewCandidates.entries()) {
+      const analysis = analysisByPhotoId[photo.id];
+      const recipe = analysis?.suggestions?.editRecipe;
+
+      if (!recipe) {
+        continue;
+      }
+
+      void ensureCorrectionPreview(
+        photo,
+        recipe,
+        index === 0 ? "current-preview" : `prefetch-preview-${index}`,
+      );
+    }
+  }, [analysisByPhotoId, currentPhoto, isOpen, prefetchedPhotos]);
 
   async function analyzePhoto(
     photo,
@@ -410,6 +589,7 @@ export default function AnalyzeQueueModal({
       });
       const nextSuggestions = {
         people: response?.data?.suggested_people || [],
+        editRecipe: response?.data?.edit_recipe || null,
         title: response?.data?.suggested_title || "",
         aiCaption: response?.data?.ai_caption || "",
         altText: response?.data?.alt_text || "",
@@ -442,6 +622,10 @@ export default function AnalyzeQueueModal({
         reason,
         suggestedTags: nextSuggestions.tags.length,
       });
+
+      if (nextSuggestions.editRecipe) {
+        void ensureCorrectionPreview(photo, nextSuggestions.editRecipe, `${reason}-preview`);
+      }
 
       return nextSuggestions;
     } catch (analyzeError) {
@@ -511,6 +695,12 @@ export default function AnalyzeQueueModal({
 
       if (fieldSelection.people) {
         payload.people = selectedPeopleIds;
+      }
+
+      if (currentSuggestionState.editRecipe) {
+        payload.edit_recipe = currentSuggestionState.editRecipe;
+        payload.apply_photo_correction = fieldSelection.photoCorrection;
+        payload.skip_photo_correction = !fieldSelection.photoCorrection;
       }
 
       if (fieldSelection.title && currentSuggestionState.title) {
@@ -659,6 +849,24 @@ export default function AnalyzeQueueModal({
     return null;
   }
 
+  const currentPhotoAnalysisStatus = currentAnalysis?.status || "idle";
+  const currentPhotoStatusLabel =
+    currentPhotoAnalysisStatus === "done"
+      ? currentSuggestionState?.editRecipe
+        ? isLoadingCorrectionPreview
+          ? "Analysis ready, preparing preview..."
+          : correctionPreviewUrl
+            ? "Ready"
+            : correctionPreviewError
+              ? "Analysis ready, preview failed"
+              : "Analysis ready"
+        : "Ready"
+      : currentPhotoAnalysisStatus === "loading"
+        ? "Analyzing..."
+        : currentPhotoAnalysisStatus === "error"
+          ? "Analysis failed"
+          : "Waiting";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/60 p-4 2xl:p-6"
@@ -685,6 +893,9 @@ export default function AnalyzeQueueModal({
                     <p>{currentPhoto.original_filename}</p>
                     <p>{formatCapturedDateTime(currentPhoto.captured_at)}</p>
                     <p>{formatPhotoLocation(currentPhoto)}</p>
+                    <p className="font-medium text-amber-700">
+                      {currentPhotoStatusLabel}
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -712,18 +923,81 @@ export default function AnalyzeQueueModal({
           {currentPhoto ? (
             <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-0 2xl:grid-cols-[620px_minmax(0,1fr)]">
               <div className="flex min-h-0 flex-col overflow-hidden border-r border-stone-200 p-6">
-                <div className="mx-auto flex h-[400px] w-[400px] max-w-full shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-stone-100 2xl:h-[620px] 2xl:w-[620px]">
-                  {currentPhoto.large_url ? (
-                    <img
-                      src={currentPhoto.large_url}
-                      alt={
-                        currentPhoto.alt_text || currentPhoto.original_filename
-                      }
-                      className="h-full w-full object-contain"
-                    />
+                <div className="mx-auto w-full max-w-[620px] shrink-0">
+                  {currentSuggestionState?.editRecipe ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="overflow-hidden border border-stone-300 bg-stone-100">
+                          <div className="border-b border-stone-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.24em] text-stone-500">
+                            Original
+                          </div>
+                          <div className="flex h-[200px] items-center justify-center p-2 2xl:h-[260px]">
+                            {currentPhoto.large_url ? (
+                              <img
+                                src={currentPhoto.large_url}
+                                alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
+                                No image available
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="overflow-hidden border border-stone-300 bg-stone-100">
+                          <div className="border-b border-stone-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.24em] text-stone-500">
+                            Corrected Preview
+                          </div>
+                          <div className="flex h-[200px] items-center justify-center p-2 2xl:h-[260px]">
+                            {isLoadingCorrectionPreview ? (
+                              <div className="text-sm text-stone-500">Generating preview...</div>
+                            ) : correctionPreviewUrl ? (
+                              <img
+                                src={correctionPreviewUrl}
+                                alt="Corrected preview"
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <div className="text-sm text-stone-500">
+                                {correctionPreviewError || "No corrected preview available"}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-3">
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-stone-700">
+                          <input
+                            type="checkbox"
+                            checked={fieldSelection.photoCorrection}
+                            onChange={() => toggleField("photoCorrection")}
+                            className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                          />
+                          Apply photo correction
+                        </label>
+                        {currentSuggestionState.editRecipe.notes ? (
+                          <p className="mt-2 text-sm text-stone-600">
+                            {currentSuggestionState.editRecipe.notes}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
-                      No image available
+                    <div className="flex h-[220px] items-center justify-center overflow-hidden border border-stone-300 bg-stone-100 2xl:h-[260px]">
+                      {currentPhoto.large_url ? (
+                        <img
+                          src={currentPhoto.large_url}
+                          alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
+                          No image available
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -757,9 +1031,23 @@ export default function AnalyzeQueueModal({
                           prefetchedPhotos.map((photo, index) => {
                             const analysis =
                               analysisByPhotoId[photo.id] || null;
+                            const previewKey = buildRecipeCacheKey(
+                              photo.id,
+                              analysis?.suggestions?.editRecipe,
+                            );
+                            const previewState =
+                              correctionPreviewByKey[previewKey] || null;
                             const statusLabel =
                               analysis?.status === "done"
-                                ? "Ready"
+                                ? analysis?.suggestions?.editRecipe
+                                  ? previewState?.status === "done"
+                                    ? "Ready"
+                                    : previewState?.status === "loading"
+                                      ? "Previewing..."
+                                      : previewState?.status === "error"
+                                        ? "Preview failed"
+                                        : "Analysis ready"
+                                  : "Ready"
                                 : analysis?.status === "loading"
                                   ? "Analyzing..."
                                   : analysis?.status === "error"

@@ -82,6 +82,34 @@ export async function updatePhoto(id, data) {
   return jsonRequest(`/api/photos/${id}`, "PUT", data);
 }
 
+export async function getPhotoCorrectionPreview(id, editRecipe, options = {}) {
+  const previewWidth = Number(options.previewWidth);
+  const response = await fetch(`/api/photos/${id}/correction-preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      edit_recipe: editRecipe,
+      ...(Number.isFinite(previewWidth) ? { preview_width: previewWidth } : {})
+    })
+  });
+
+  if (!response.ok) {
+    let errorMessage = "Failed to load correction preview";
+
+    try {
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      errorMessage = data?.error || errorMessage;
+    } catch {}
+
+    throw new Error(errorMessage);
+  }
+
+  return response.blob();
+}
+
 export async function deletePhoto(id) {
   return request(`/api/photos/${id}`, {
     method: "DELETE"

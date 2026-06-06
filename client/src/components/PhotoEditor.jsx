@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deletePhoto, generateCaption, updatePhoto } from "../api";
+import { appendPhotoVersion } from "../photoUrls";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 import PeopleSelector from "./PeopleSelector";
 import TagInput from "./TagInput";
@@ -489,7 +490,7 @@ export default function PhotoEditor({
               aria-label="Open larger photo preview"
             >
               <img
-                src={photo.large_url}
+                src={appendPhotoVersion(photo.large_url, photo)}
                 alt={photo.alt_text || photo.original_filename}
                 className="max-h-[300px] w-full object-contain"
               />
@@ -684,7 +685,7 @@ export default function PhotoEditor({
             Close
           </button>
           <img
-            src={photo.large_url}
+            src={appendPhotoVersion(photo.large_url, photo)}
             alt={photo.alt_text || photo.original_filename}
             className="max-h-[90vh] max-w-full border border-stone-300 bg-white object-contain shadow-2xl"
           />

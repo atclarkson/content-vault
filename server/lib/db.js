@@ -89,6 +89,22 @@ function ensurePhotoColumns(database) {
     {
       name: "large_url",
       sql: "ALTER TABLE photos ADD COLUMN large_url TEXT"
+    },
+    {
+      name: "edit_recipe_json",
+      sql: "ALTER TABLE photos ADD COLUMN edit_recipe_json TEXT"
+    },
+    {
+      name: "correction_status",
+      sql: "ALTER TABLE photos ADD COLUMN correction_status TEXT NOT NULL DEFAULT 'none' CHECK (correction_status IN ('none', 'suggested', 'applied', 'skipped'))"
+    },
+    {
+      name: "photo_correction_applied_at",
+      sql: "ALTER TABLE photos ADD COLUMN photo_correction_applied_at TEXT"
+    },
+    {
+      name: "image_version",
+      sql: "ALTER TABLE photos ADD COLUMN image_version INTEGER NOT NULL DEFAULT 1"
     }
   ];
 
@@ -99,6 +115,7 @@ function ensurePhotoColumns(database) {
   }
 
   database.exec("CREATE INDEX IF NOT EXISTS idx_photos_geo_status ON photos (geo_status)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photos_correction_applied_at ON photos (photo_correction_applied_at)");
 }
 
 function seedPeople(database) {

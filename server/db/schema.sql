@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS photos (
   thumbnail_url TEXT,
   small_url TEXT,
   large_url TEXT,
+  edit_recipe_json TEXT,
+  correction_status TEXT NOT NULL DEFAULT 'none' CHECK (correction_status IN ('none', 'suggested', 'applied', 'skipped')),
+  photo_correction_applied_at TEXT,
+  image_version INTEGER NOT NULL DEFAULT 1,
   uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
@@ -183,6 +187,7 @@ CREATE TABLE IF NOT EXISTS journal_entries (
 CREATE INDEX IF NOT EXISTS idx_photos_processing_status ON photos (processing_status);
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos (captured_at);
+CREATE INDEX IF NOT EXISTS idx_photos_correction_applied_at ON photos (photo_correction_applied_at);
 CREATE INDEX IF NOT EXISTS idx_tag_groups_sort_order ON tag_groups (sort_order);
 CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start);
 CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published);

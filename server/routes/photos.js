@@ -1,9 +1,55 @@
 const express = require("express");
 const { getDb, initializeDatabase } = require("../lib/db");
+const processImage = require("../lib/image");
+const { createPreviewDerivative } = require("../lib/image");
+const { uploadFile } = require("../lib/r2");
+const { normalizeEditRecipe } = require("../lib/photoCorrection");
 
 const router = express.Router();
 
 initializeDatabase();
+
+router.post("/:id/correction-preview", async (req, res) => {
+  try {
+    const db = getDb();
+    const photoId = normalizeSingleId(req.params.id);
+    const photo = db.prepare(`
+      SELECT *
+      FROM photos
+      WHERE id = ?
+        AND deleted_at IS NULL
+    `).get(photoId);
+
+    if (!photo) {
+      return res.status(404).json({ error: "Photo not found" });
+    }
+
+    const editRecipe = normalizeEditRecipe(req.body?.edit_recipe);
+
+    if (!editRecipe) {
+      return res.status(400).json({ error: "A valid edit_recipe is required" });
+    }
+
+    const previewWidth = normalizePreviewWidth(req.body?.preview_width);
+    const sourceUrl = photo.small_url || photo.large_url;
+
+    if (!sourceUrl) {
+      return res.status(400).json({ error: "Photo does not have a preview image URL" });
+    }
+
+    const sourceBuffer = await fetchImageBuffer(sourceUrl);
+    const previewBuffer = await createPreviewDerivative(sourceBuffer, previewWidth, editRecipe);
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "no-store");
+    return res.send(previewBuffer);
+  } catch (error) {
+    if (error.message === "Invalid photo id") {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.status(500).json({ error: error.message || "Failed to generate correction preview" });
+  }
+});
 
 router.post("/bulk-update", (req, res) => {
   try {
@@ -126,7 +172,7 @@ router.get("/:id", (req, res) => {
   }
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const db = getDb();
     const photoId = normalizeSingleId(req.params.id);
@@ -143,6 +189,11 @@ router.put("/:id", (req, res) => {
     const tags = Object.prototype.hasOwnProperty.call(payload, "tags")
       ? normalizeTagNames(payload.tags)
       : null;
+    const editRecipe = Object.prototype.hasOwnProperty.call(payload, "edit_recipe")
+      ? normalizeEditRecipe(payload.edit_recipe)
+      : null;
+    const shouldApplyPhotoCorrection = parseBooleanFlag(payload.apply_photo_correction);
+    const shouldSkipPhotoCorrection = parseBooleanFlag(payload.skip_photo_correction);
 
     const updates = [];
     const params = [];
@@ -154,6 +205,11 @@ router.put("/:id", (req, res) => {
     addScalarUpdate(updates, params, payload, "ai_caption");
     addScalarUpdate(updates, params, payload, "camera_make");
     addScalarUpdate(updates, params, payload, "camera_model");
+
+    if (Object.prototype.hasOwnProperty.call(payload, "edit_recipe")) {
+      updates.push("edit_recipe_json = ?");
+      params.push(editRecipe ? JSON.stringify(editRecipe) : null);
+    }
 
     if (Object.prototype.hasOwnProperty.call(payload, "captured_at")) {
       updates.push("captured_at = ?");
@@ -171,6 +227,21 @@ router.put("/:id", (req, res) => {
       }
 
       updates.push("location_manually_edited = 1");
+    }
+
+    let nextCorrectionStatus = null;
+
+    if (Object.prototype.hasOwnProperty.call(payload, "edit_recipe")) {
+      nextCorrectionStatus = editRecipe ? "suggested" : "none";
+    }
+
+    if (shouldSkipPhotoCorrection && editRecipe) {
+      nextCorrectionStatus = "skipped";
+    }
+
+    if (nextCorrectionStatus) {
+      updates.push("correction_status = ?");
+      params.push(nextCorrectionStatus);
     }
 
     const applyUpdate = db.transaction(() => {
@@ -195,7 +266,26 @@ router.put("/:id", (req, res) => {
       }
     });
 
+    if (shouldApplyPhotoCorrection) {
+      if (!editRecipe) {
+        return res.status(400).json({ error: "A valid edit_recipe is required to apply correction" });
+      }
+
+      await applyPhotoCorrection(existingPhoto, editRecipe);
+    }
+
     applyUpdate();
+
+    if (shouldApplyPhotoCorrection) {
+      db.prepare(`
+        UPDATE photos
+        SET correction_status = 'applied',
+            photo_correction_applied_at = CURRENT_TIMESTAMP,
+            image_version = COALESCE(image_version, 1) + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(photoId);
+    }
 
     const updatedPhoto = db.prepare("SELECT * FROM photos WHERE id = ?").get(photoId);
     const [enrichedPhoto] = attachPeopleAndTags(db, [updatedPhoto]);
@@ -457,6 +547,7 @@ function attachPeopleAndTags(db, photos) {
 
   return photos.map((photo) => ({
     ...photo,
+    edit_recipe: parseEditRecipeJson(photo.edit_recipe_json),
     people: peopleMap.get(photo.id) || [],
     tags: tagsMap.get(photo.id) || []
   }));
@@ -464,6 +555,16 @@ function attachPeopleAndTags(db, photos) {
 
 function parseBooleanFlag(value) {
   return value === true || value === "true";
+}
+
+function normalizePreviewWidth(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return 520;
+  }
+
+  return Math.max(240, Math.min(720, Math.round(numericValue)));
 }
 
 function parseCsvList(value) {
@@ -733,6 +834,46 @@ function isBadRequestError(error) {
     || error.message === "Expected an array of positive integer ids"
     || error.message === "Expected an array of tag names"
     || error.message.startsWith("Unknown people ids");
+}
+
+function parseEditRecipeJson(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchImageBuffer(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function applyPhotoCorrection(photo, editRecipe) {
+  if (!photo.original_url) {
+    throw new Error("Photo does not have an original image URL");
+  }
+
+  const originalBuffer = await fetchImageBuffer(photo.original_url);
+  const processedImage = await processImage(originalBuffer, photo.original_filename, {
+    editRecipe
+  });
+
+  await Promise.all([
+    uploadFile(photo.thumbnail_r2_key, processedImage.buffers.thumbnail, "image/jpeg"),
+    uploadFile(photo.small_r2_key, processedImage.buffers.small, "image/jpeg"),
+    uploadFile(photo.large_r2_key, processedImage.buffers.large, "image/jpeg")
+  ]);
 }
 
 module.exports = router;
