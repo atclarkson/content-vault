@@ -4,10 +4,55 @@ const processImage = require("../lib/image");
 const { createPreviewDerivative } = require("../lib/image");
 const { uploadFile } = require("../lib/r2");
 const { normalizeEditRecipe } = require("../lib/photoCorrection");
+const { queryPhotos, buildPhotoOrderByClause, buildMissingCondition } = require("../lib/photoQuery");
+const { isQueryBadRequestError } = require("../lib/queryUtils");
 
 const router = express.Router();
 
 initializeDatabase();
+
+router.post("/query", (req, res) => {
+  try {
+    const db = getDb();
+    const result = queryPhotos(db, req.body || {});
+
+    return res.json({
+      data: {
+        items: result.items,
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        sort: result.applied.sort,
+        view: result.applied.view,
+        applied_filters: {
+          ...result.applied.filters,
+          people_all: result.applied.filters.peopleAll,
+          people_any: result.applied.filters.peopleAny,
+          tags_all: result.applied.filters.tagsAll,
+          tags_any: result.applied.filters.tagsAny,
+          date_from: result.applied.filters.dateFrom,
+          date_to: result.applied.filters.dateTo,
+          processing_status: result.applied.filters.processingStatus,
+          geo_status: result.applied.filters.geoStatus,
+          has_people: result.applied.filters.hasPeople,
+          has_tags: result.applied.filters.hasTags,
+          has_location: result.applied.filters.hasLocation,
+          include_deleted: result.applied.filters.includeDeleted
+        }
+      }
+    });
+  } catch (error) {
+    if (isBadRequestError(error)) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    if (isQueryBadRequestError(error)) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 router.post("/:id/correction-preview", async (req, res) => {
   try {
@@ -443,67 +488,6 @@ function buildPhotoFilters(query) {
   };
 }
 
-function buildMissingCondition(field) {
-  if (field === "city") {
-    return "NULLIF(TRIM(COALESCE(photos.city, '')), '') IS NULL";
-  }
-
-  if (field === "country") {
-    return "NULLIF(TRIM(COALESCE(photos.country, '')), '') IS NULL";
-  }
-
-  if (field === "people") {
-    return `
-      NOT EXISTS (SELECT 1 FROM photo_people WHERE photo_people.photo_id = photos.id)
-      AND NOT EXISTS (
-        SELECT 1
-        FROM photo_tags
-        INNER JOIN tags ON tags.id = photo_tags.tag_id
-        WHERE photo_tags.photo_id = photos.id
-          AND LOWER(tags.name) = 'no-people'
-      )
-    `;
-  }
-
-  if (field === "tags") {
-    return "NOT EXISTS (SELECT 1 FROM photo_tags WHERE photo_tags.photo_id = photos.id)";
-  }
-
-  if (field === "title") {
-    return "NULLIF(TRIM(COALESCE(photos.title, '')), '') IS NULL";
-  }
-
-  if (field === "alt_text") {
-    return "NULLIF(TRIM(COALESCE(photos.alt_text, '')), '') IS NULL";
-  }
-
-  if (field === "ai_caption") {
-    return "NULLIF(TRIM(COALESCE(photos.ai_caption, '')), '') IS NULL";
-  }
-
-  return null;
-}
-
-function buildPhotoOrderByClause(sort) {
-  switch (sort) {
-    case "oldest":
-      return "ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) ASC, photos.id ASC";
-    case "uploaded_newest":
-      return "ORDER BY photos.uploaded_at DESC, photos.id DESC";
-    case "uploaded_oldest":
-      return "ORDER BY photos.uploaded_at ASC, photos.id ASC";
-    case "country":
-      return "ORDER BY NULLIF(TRIM(COALESCE(photos.country, '')), '') IS NULL, LOWER(COALESCE(photos.country, '')) ASC, COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
-    case "city":
-      return "ORDER BY NULLIF(TRIM(COALESCE(photos.city, '')), '') IS NULL, LOWER(COALESCE(photos.city, '')) ASC, COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
-    case "filename":
-      return "ORDER BY LOWER(COALESCE(photos.original_filename, '')) ASC, photos.id ASC";
-    case "newest":
-    default:
-      return "ORDER BY COALESCE(photos.captured_at, photos.uploaded_at) DESC, photos.id DESC";
-  }
-}
-
 function attachPeopleAndTags(db, photos) {
   if (photos.length === 0) {
     return photos;
@@ -833,6 +817,11 @@ function isBadRequestError(error) {
   return error.message === "Invalid photo id"
     || error.message === "Expected an array of positive integer ids"
     || error.message === "Expected an array of tag names"
+    || error.message === "ids must be an array of positive integers"
+    || error.message === "Boolean filters must be true or false"
+    || error.message.startsWith("Unsupported sort:")
+    || error.message.startsWith("Unsupported view:")
+    || error.message.startsWith("Value must be an integer between")
     || error.message.startsWith("Unknown people ids");
 }
 

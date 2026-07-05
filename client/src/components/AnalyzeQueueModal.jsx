@@ -149,6 +149,7 @@ function buildRecipeCacheKey(photoId, editRecipe) {
 export default function AnalyzeQueueModal({
   isOpen,
   photos,
+  startPhotoId,
   people,
   tags,
   tagGroups,
@@ -208,7 +209,12 @@ export default function AnalyzeQueueModal({
     }
 
     wasOpenRef.current = true;
-    setQueue(photos);
+    const startIndex = photos.findIndex((photo) => photo.id === startPhotoId);
+    const orderedQueue = startIndex > 0
+      ? [...photos.slice(startIndex), ...photos.slice(0, startIndex)]
+      : photos;
+
+    setQueue(orderedQueue);
     setAnalysisByPhotoId({});
     setError("");
     setActivityLog([]);
@@ -224,10 +230,11 @@ export default function AnalyzeQueueModal({
     });
     correctionPreviewByKeyRef.current = {};
     console.info("[AnalyzeQueue] opened", {
-      queueLength: photos.length,
-      photoIds: photos.map((photo) => photo.id),
+      queueLength: orderedQueue.length,
+      startPhotoId,
+      photoIds: orderedQueue.map((photo) => photo.id),
     });
-  }, [isOpen, photos]);
+  }, [isOpen, photos, startPhotoId]);
 
   useEffect(
     () => () => {

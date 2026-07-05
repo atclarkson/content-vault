@@ -3,7 +3,8 @@ const NAV_ITEMS = [
   { id: "people", label: "People" },
   { id: "tags", label: "Tags" },
   { id: "upload", label: "Upload" },
-  { id: "export", label: "Import / Export" },
+  { id: "export", label: "Export" },
+  { id: "import", label: "Import" },
   { id: "settings", label: "Settings" }
 ];
 

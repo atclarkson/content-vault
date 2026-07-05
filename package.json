@@ -8,8 +8,11 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "nodemon server/index.js",
     "dev:client": "vite --config client/vite.config.js",
+    "build": "npm run build:client",
     "build:client": "vite build --config client/vite.config.js",
-    "start": "node server/index.js"
+    "import:dayone": "node scripts/import-dayone.js",
+    "start": "node server/index.js",
+    "start:local": "npm run build:client && npm start"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.821.0",

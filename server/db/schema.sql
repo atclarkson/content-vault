@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS videos (
   filmed_location_source TEXT DEFAULT 'none' CHECK (filmed_location_source IN ('none', 'manual', 'ai_suggested', 'confirmed')),
   alt_text TEXT,
   ai_caption TEXT,
+  subtitles_text TEXT,
   notes_for_ai TEXT,
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -292,6 +292,7 @@ function mapExportVideos(db, videos) {
     },
     ai_caption: video.ai_caption || null,
     alt_text: video.alt_text || null,
+    subtitles_text: video.subtitles_text || null,
     notes_for_ai: video.notes_for_ai || null
   }));
 }

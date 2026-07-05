@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getPeople, getTagGroups, getTags } from "./api";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
+import ImportView from "./components/ImportView";
 import PeopleView from "./components/PeopleView";
 import SettingsView from "./components/SettingsView";
 import TagsView from "./components/TagsView";
@@ -13,7 +14,8 @@ const VIEW_LABELS = {
   people: "People",
   tags: "Tags",
   upload: "Upload",
-  export: "Import / Export",
+  export: "Export",
+  import: "Import",
   settings: "Settings"
 };
 
@@ -87,7 +89,7 @@ export default function App() {
             </div>
           ) : null}
 
-          {currentView === "export" || currentView === "settings" ? (
+          {currentView === "export" || currentView === "import" || currentView === "settings" ? (
             <div className="mb-4">
               <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
                 {VIEW_LABELS[currentView]}
@@ -112,6 +114,10 @@ export default function App() {
           ) : currentView === "settings" ? (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <SettingsView />
+            </div>
+          ) : currentView === "import" ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ImportView />
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

@@ -1,5 +1,7 @@
 const express = require("express");
 const { getDb, initializeDatabase } = require("../lib/db");
+const { queryVideos } = require("../lib/videoQuery");
+const { isMissingTableError, isQueryBadRequestError, tableExists } = require("../lib/queryUtils");
 const {
   getUploadsPlaylistId,
   getPlaylistVideoIds,
@@ -10,6 +12,31 @@ const {
 const router = express.Router();
 
 initializeDatabase();
+
+router.post("/query", (req, res) => {
+  try {
+    const db = getDb();
+    const result = queryVideos(db, req.body || {});
+    return res.json({
+      data: {
+        items: result.items,
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset
+      }
+    });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return res.json({ data: { items: [], total: 0, limit: 20, offset: 0 } });
+    }
+
+    if (isQueryBadRequestError(error)) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 router.post("/sync", async (req, res) => {
   try {
@@ -128,6 +155,10 @@ router.post("/refresh-stats", async (req, res) => {
 router.get("/", (req, res) => {
   try {
     const db = getDb();
+    if (!tableExists(db, "videos")) {
+      return res.json({ data: [] });
+    }
+
     const videos = db
       .prepare(
         `
@@ -141,6 +172,10 @@ router.get("/", (req, res) => {
 
     return res.json({ data: attachPeopleAndTags(db, videos) });
   } catch (error) {
+    if (isMissingTableError(error)) {
+      return res.json({ data: [] });
+    }
+
     return res.status(500).json({ error: error.message });
   }
 });
@@ -203,6 +238,7 @@ router.put("/:id", (req, res) => {
     addScalarUpdate(updates, params, payload, "description");
     addScalarUpdate(updates, params, payload, "alt_text");
     addScalarUpdate(updates, params, payload, "ai_caption");
+    addScalarUpdate(updates, params, payload, "subtitles_text");
     addScalarUpdate(updates, params, payload, "notes_for_ai");
     addScalarUpdate(updates, params, payload, "video_type");
     addScalarUpdate(updates, params, payload, "video_type_manually_set");

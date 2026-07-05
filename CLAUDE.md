@@ -1,90 +1,54 @@
 # content-vault
 
-A locally-run personal content management tool for organizing and cataloging family travel media. Built and used by one person (Adam) on macOS. Not a SaaS product — a personal content engine that stores structured metadata for use with AI tools and blog workflows.
+Local-only personal media catalog for Adam's family travel content. Runs on macOS, stores metadata in SQLite, stores image files in Cloudflare R2, and exposes a React UI plus JSON APIs for editing and export. This is not a multi-user app and not a SaaS product.
 
-The primary view is a **Timeline** — a chronological travel history where destinations act as the spine and photos, videos, and other content slot in where they belong.
+The app has expanded beyond the original timeline-only photo catalog. It now covers:
 
-Current state: Phases 1–6.5 complete. Phase 7 (YouTube video sync) is next.
+- photo upload, metadata editing, bulk edits, and soft delete / restore
+- timeline browsing across photos and videos
+- people, tags, and tag groups management
+- destination imports
+- Day One journal import, including journal text storage and photo matching
+- YouTube sync and video metadata editing
+- export and structured query endpoints for AI workflows
+- caption settings and AI-generated captions / alt text
+- photo correction preview + saved edit recipes
 
----
-
-## How to Run
+## Run
 
 ```bash
 npm install
 npm run dev
-# App at http://localhost:5173 (Vite dev) proxying API to http://localhost:3000
 ```
 
----
+Dev setup:
 
-## Tech Stack
+- Express API: `http://localhost:3000`
+- Vite client: `http://localhost:5173`
 
-**Backend:** Node.js, Express, better-sqlite3, sharp, multer, @aws-sdk/client-s3, exif-reader
+Local production-style run:
 
-**Frontend:** React, Vite, Tailwind CSS — lives in `/client`, served by Express in production
-
-**Storage:** Cloudflare R2 (images, public bucket), SQLite (`server/db/content-vault.db`)
-
-**External APIs:**
-
-- Nominatim/OpenStreetMap — reverse geocoding, no key, rate-limited to 1 req/sec, `accept-language=en`
-- Anthropic Claude API — AI caption + alt text (`claude-sonnet-4-6`)
-- YouTube Data API v3 — Phase 7, channel ID and API key in `.env`
-
----
-
-## Project Structure
-
-```
-content-vault/
-├── server/
-│   ├── index.js
-│   ├── routes/
-│   │   ├── upload.js         # POST /api/upload
-│   │   ├── photos.js         # GET/PUT/DELETE /api/photos
-│   │   ├── people.js         # GET/POST /api/people
-│   │   ├── tags.js           # GET /api/tags
-│   │   ├── destinations.js   # GET /api/destinations, POST /api/destinations/import
-│   │   ├── caption.js        # POST /api/caption/:id
-│   │   ├── export.js         # GET /api/export
-│   │   ├── processing.js     # GET /api/processing/status
-│   │   ├── reconcile.js      # POST /api/reconcile
-│   │   ├── videos.js         # Phase 7
-│   │   └── settings.js       # Phase 7
-│   ├── lib/
-│   │   ├── image.js          # sharp + sips HEIC, resize, EXIF
-│   │   ├── r2.js             # R2 upload/delete, singleton
-│   │   ├── db.js             # SQLite singleton, initializeDatabase(), getDb()
-│   │   ├── geo.js            # Nominatim, rate-limited, English names
-│   │   ├── queue.js          # Async job queue, max 3 concurrent
-│   │   ├── hash.js           # SHA-256 duplicate detection
-│   │   ├── reconcile.js      # R2/SQLite integrity
-│   │   └── youtube.js        # Phase 7 — YouTube Data API v3 wrapper
-│   └── db/
-│       └── schema.sql
-├── client/src/
-│   ├── App.jsx               # View state, fetches people/tags on mount
-│   ├── api.js                # ALL fetch calls — never inline fetch in components
-│   └── components/
-│       ├── Sidebar.jsx
-│       ├── TimelineView.jsx  # Main view — destinations, photos, videos, filters
-│       ├── PhotoGrid.jsx     # Reusable thumbnail grid, supports embedded mode
-│       ├── PhotoFilters.jsx  # Missing fields, country, city, people, tags
-│       ├── PhotoEditor.jsx   # Edit photo metadata, AI caption, notes for AI
-│       ├── VideoEditor.jsx   # Phase 7 — edit video metadata, AI location suggestion
-│       ├── BulkActionBar.jsx
-│       ├── TagInput.jsx
-│       ├── PeopleSelector.jsx
-│       ├── UploadView.jsx
-│       └── ExportView.jsx    # Import destinations CSV, YouTube sync, export JSON
+```bash
+npm run start:local
 ```
 
----
+Helper entrypoints already in the repo:
+
+- `start-content-vault.command` for double-click launch on macOS
+- `launchd/com.adamclarkson.content-vault.plist` for background local service
+- `scripts/run-local.sh` for the launchd path
+- `npm run import:dayone -- /path/to/export.zip [--skip-photos]` for large Day One imports from disk
+
+## Stack
+
+- Backend: Node.js, Express, better-sqlite3, sharp, multer, unzipper, `@aws-sdk/client-s3`
+- Frontend: React 18, Vite, Tailwind CSS
+- Storage: SQLite at `server/db/content-vault.db`, Cloudflare R2 for image files
+- macOS dependency: `sips` for HEIC/HEIF conversion before Sharp processing
 
 ## Environment Variables
 
-```
+```dotenv
 R2_ACCOUNT_ID=
 R2_BUCKET_NAME=
 R2_ACCESS_KEY_ID=
@@ -96,172 +60,184 @@ YOUTUBE_CHANNEL_ID=
 PORT=3000
 ```
 
----
+## Current App Shape
+
+Top-level UI views in `client/src/App.jsx`:
+
+- `Timeline`
+- `People`
+- `Tags`
+- `Upload`
+- `Export`
+- `Import`
+- `Settings`
+
+Key frontend files:
+
+- `client/src/api.js` is the single fetch layer. Do not inline `fetch` calls in components.
+- `client/src/components/TimelineView.jsx` is still the main catalog view.
+- `client/src/components/ImportView.jsx` now owns destination import, Day One import, and YouTube sync/stats refresh.
+- `client/src/components/ExportView.jsx` handles JSON export plus AI-friendly query/export workflows.
+- `client/src/components/SettingsView.jsx` currently edits `caption_bio`, which is autosaved.
+
+## API Surface
+
+Registered in `server/index.js`:
+
+- `/api/health`
+- `/api/photos`
+- `/api/upload`
+- `/api/people`
+- `/api/tags`
+- `/api/tag-groups`
+- `/api/export`
+- `/api/caption`
+- `/api/import/day-one`
+- `/api/destinations`
+- `/api/journal-entries`
+- `/api/journals`
+- `/api/videos`
+- `/api/research`
+- `/api/settings`
+- `/api/processing`
+- `/api/reconcile`
+
+Important current workflows:
+
+- `POST /api/photos/query`, `POST /api/videos/query`, `POST /api/journal-entries/query` provide structured query APIs.
+- `POST /api/research/brief` returns a combined summary payload across photos, videos, and journals for AI use.
+- `POST /api/import/day-one` streams SSE progress in the browser importer.
+- `POST /api/videos/sync` syncs new YouTube uploads.
+- `POST /api/videos/refresh-stats` refreshes stored YouTube stats.
+- `POST /api/caption/:id` and `POST /api/caption/video/:id` generate captions.
+- `POST /api/photos/:id/correction-preview` renders a temporary preview for a photo edit recipe.
 
 ## Database
 
-- **Engine:** better-sqlite3 (synchronous — no async/await on DB calls)
-- **Location:** `server/db/content-vault.db` — local only, never committed
-- **Schema:** `server/db/schema.sql` — single source of truth
-- **Migrations:** `ensurePhotoColumns()`, `ensureDestinationsTable()` in `db.js`
+Database bootstrap lives in `server/lib/db.js`. `initializeDatabase()` loads `server/db/schema.sql` and also runs additive table/column guards for older local databases.
 
-### Tables
+Current main tables:
 
-**`photos`**
+- `photos`
+- `people`
+- `photo_people`
+- `tags`
+- `photo_tags`
+- `tag_groups`
+- `destinations`
+- `videos`
+- `video_people`
+- `video_tags`
+- `settings`
+- `journal_entries`
 
-- R2 keys + URLs for 4 sizes: original, thumbnail (200px), small (400px), large (1000px)
-- EXIF stored, GPS → `latitude`/`longitude`
-- `processing_status`: queued, processing, complete, failed, needs_review
-- `geo_status`: queued, complete, skipped, failed
-- `date_source`: exif, file_created, file_modified, uploaded_at, manual
-- `date_manually_edited`, `location_manually_edited` — once set manually, never auto-overwrite
-- `ai_caption`, `alt_text`, `notes_for_ai`
-- `deleted_at` — soft delete only
+Notable current columns:
 
-**`people`** — seeded: Adam, Lindsay, Lily, Cora, Harper. Extensible via UI.
+- `photos`: AI caption fields, location fields, Day One linkage via `day_one_uuid`, photo correction fields `edit_recipe_json`, `correction_status`, `photo_correction_applied_at`, `image_version`, and soft delete via `deleted_at`
+- `people`: birthday, notes, YouTube channel, Instagram, website
+- `tags`: optional `group_id`
+- `videos`: YouTube metadata, stats, filmed date/location fields, subtitles text, AI fields, soft delete
+- `settings`: generic key/value store, currently used by the caption settings UI
+- `journal_entries`: imported Day One text plus place/weather metadata
 
-**`photo_people`**, **`photo_tags`** — join tables
+## Current Behavior
 
-**`tags`** — powers autocomplete
+- `better-sqlite3` is synchronous. Do not add `await` around DB calls.
+- Photos are soft-deleted, not hard-deleted.
+- Accepted upload types: JPEG, PNG, HEIC/HEIF, WebP.
+- RAW formats are rejected.
+- Image derivatives stored for photos: original, thumbnail, small, large.
+- Day One import matches existing photos by MD5 first, then by near timestamp + GPS.
+- Day One import stores text-only entries in `journal_entries`.
+- YouTube sync classifies videos as `short` when `duration_seconds < 181`, otherwise `longform`.
+- Tag groups are first-class and editable through `/api/tag-groups`.
+- Export JSON includes both photos and videos.
 
-**`destinations`**
+## Conventions
 
-- `city`, `country`, `date_start`, `date_end`, `duration_days`, `sort_order`
-- Unique on `city + date_start`
-- Only `date_start >= 2022-01-01` imported
-- INSERT OR IGNORE — safe to re-import
-
-**`videos`** — Phase 7
-
-- `youtube_id` (unique), `youtube_url`, `title`, `description`, `thumbnail_url`
-- `duration_seconds`, `video_type` (short/longform), `video_type_manually_set`
-- `video_category`: travel, sponsored, review, other — defaults to travel
-  - travel: needs filmed date + location, appears in timeline destination blocks
-  - sponsored/review/other: no location required, appears in "Brand & Sponsored Content" section at bottom of timeline
-- `date_published`, `date_filmed`, `date_filmed_end`
-- `date_filmed_source`: manual, ai_suggested, confirmed
-- `view_count`, `like_count`, `comment_count`, `stats_refreshed_at`
-- `filmed_city`, `filmed_country`
-- `filmed_location_source`: manual, ai_suggested, confirmed
-- `ai_caption`, `alt_text`, `notes_for_ai`
-- `deleted_at`, `created_at`, `updated_at`
-
-**`video_people`**, **`video_tags`** — join tables
-
-**`settings`** — key/value, used for YouTube channel ID
-
----
-
-## Coding Conventions
-
-- No TypeScript. Plain JavaScript.
-- No ORM. better-sqlite3 directly, parameterized queries only.
-- All API calls through `client/src/api.js`. Never inline fetch in components.
-- Express routes stay thin — logic in `server/lib/`.
-- No async/await on better-sqlite3 calls.
-- Tailwind only. Reuse: `panel`, `field`, `btn-primary`, `btn-secondary`.
+- Plain JavaScript only. No TypeScript.
+- No ORM. Use parameterized `better-sqlite3` queries directly.
+- Keep Express routes thin when practical, but follow existing patterns in the touched file instead of forcing abstraction.
 - Functional React components only.
-- Error responses: `{ error: "message" }` + HTTP status.
-- Success responses: `{ data: ... }`
+- Tailwind CSS only.
+- Error shape: `{ error: "message" }`
+- Success shape: `{ data: ... }`
 
----
+## Files Worth Knowing
 
-## Image Processing
+- `server/lib/photoQuery.js`, `server/lib/videoQuery.js`, `server/lib/journalQuery.js` hold the structured query logic
+- `server/lib/dayOneImport.js` is the disk-based Day One importer used by the CLI script
+- `server/lib/photoCorrection.js` normalizes saved photo edit recipes
+- `scripts/import-dayone.js` is the CLI entrypoint for large imports
+- `server/routes/day-one.js` is the browser upload import path
+- `server/routes/photos.js` and `server/routes/videos.js` contain most editing behavior
 
-- Accepted: JPEG, PNG, HEIC/HEIF, WebP
-- Rejected: all RAW formats — rejected immediately, nothing stored
-- HEIC: converted via macOS `sips` before sharp processes it. Original stored as-is in R2.
-- 4 sizes: original, thumbnail (200px), small (400px), large (1000px). All auto-rotated.
-- R2 key pattern: `photos/{size}/{uuid}.ext`
+## Do Not Re-Explain The Project As
 
----
+- "Phase 7 is next"
+- "YouTube sync is not built yet"
+- "Settings only store channel ID"
+- "The app is just a travel photo timeline"
 
-## Timeline View
+Those are stale. The codebase already includes videos, tag groups, Day One import, journal storage, settings UI, AI query/export helpers, and photo correction support.
 
-- Fetches destinations + photos (+ videos in Phase 7) on mount
-- Groups content into destination blocks by date range matching
-- **Matching priority:** (1) city match + date proximity, (2) country + date range, (3) pure date range, (4) Undated bucket
-- Videos use `date_filmed` if `date_filmed_source` is confirmed or manual, else `date_published`
-- Videos with `video_category` != travel go to "Brand & Sponsored Content" section at bottom
-- Undated photos always at bottom
-- Sort: Newest First / Oldest First
-- Content type: All | Photos | Videos (Videos enabled in Phase 7)
-- Filters active → flat PhotoGrid, no timeline grouping
-- Empty destination blocks → drag-and-drop zone (pre-tags city/country only if photo has none)
+## Planned Deployment
 
----
+This repo is currently local-first, but the planned hosted deployment target is:
 
-## AI Caption Generation
+- Server: Hostinger KVM 1 on Ubuntu 24.04 LTS
+- Domain: subdomain of the existing domain, for example `vault.adamandlinds.com`
+- DNS and proxy: Cloudflare, with the subdomain pointed at the VPS IP and SSL handled there
+- Access control: Cloudflare Access on the free tier, requiring Google login for browser access
+- Process manager: PM2
+- Reverse proxy: nginx forwarding `80` and `443` to Node on port `3000`
 
-- `POST /api/caption/:id`
-- Downloads `large_url`, sends to Anthropic as base64 image + all metadata
-- Prompt rules: casual family travel blog tone, mention people by name, no em dashes, no AI vocabulary (vibrant, nestled, showcasing, highlighting, testament, pivotal, underscore, foster, enhance), no participial phrase endings, no rule of three, write like you were there
-- Saves `ai_caption`. Generates `alt_text` if currently null.
-- `notes_for_ai` provides private context for better captions
+### Planned Deployment Steps
 
----
+1. SSH into the VPS and install Node.js via `nvm`, plus `nginx` and `pm2`.
+2. Clone the GitHub repo onto the server.
+3. Copy the `.env` file to the server. Never commit it.
+4. Copy `server/db/content-vault.db` from the local Mac to the server.
+5. Run `npm install`.
+6. Run `npm run build:client`.
+7. Start the app with `pm2 start server/index.js --name content-vault`.
+8. Configure nginx to proxy to port `3000`.
+9. Point the Cloudflare DNS record at the VPS IP.
+10. Enable Cloudflare Access on the subdomain and restrict it to Adam's Google account.
+11. Add `API_SECRET_KEY` to `.env` and wire Express auth middleware around the API.
 
-## Phase 7: YouTube Video Sync
+### Planned Security Model
 
-### Credentials (both in .env)
+- Browser UI protected by Cloudflare Access
+- All API requests protected with `x-api-key: YOUR_SECRET`
+- VPS firewall open only on ports `22`, `80`, and `443`
+- SSL terminated by Cloudflare
 
-- `YOUTUBE_API_KEY` — Google Cloud API key, YouTube Data API v3 enabled
-- `YOUTUBE_CHANNEL_ID` — your channel ID
+### Linux Migration Work Still Required
 
-### Sync Flow
+These are known macOS-to-Linux gaps that should be treated as pending work, not already solved:
 
-1. Call `channels.list` to get uploads playlist ID
-2. Call `playlistItems.list` (paginated) to get all video IDs
-3. Filter out IDs already in DB
-4. Call `videos.list` in batches of 50 for full details
-5. Classify: duration < 60s = short, >= 60s = longform
-6. Insert new records, default `video_category` = travel
+- HEIC conversion: `sips` is macOS-only. On Linux, install `libheif` and update `server/lib/image.js` to use OS detection, `sips` on macOS, and Sharp-native HEIC handling on Linux.
+- Sharp: rebuild or reinstall on the VPS for the server architecture.
+- File path handling should already be fine because the codebase uses `path.join()`.
+- SQLite WAL mode should work on Linux as-is.
 
-### Stats Refresh
+### Planned MCP Server
 
-- Calls `videos.list` with statistics part only
-- Updates view/like/comment counts + `stats_refreshed_at`
+There is a planned MCP surface for direct AI access to the catalog.
 
-### AI Location Suggestion
+- Endpoint: `POST /mcp`
+- Protocol: Anthropic MCP over JSON-RPC
+- Auth: same `x-api-key` header as the rest of the API
+- Likely implementation file: `server/routes/mcp.js`
 
-- `POST /api/videos/:id/suggest-location`
-- Sends title + description + full destinations list to Claude
-- Claude guesses filmed city, country, date range based on content clues
-- Returns `{ filmed_city, filmed_country, date_filmed, confidence, reasoning }`
-- User confirms or overrides in VideoEditor
-- On confirm: saves with `date_filmed_source: confirmed`, `filmed_location_source: confirmed`
+Planned tools:
 
-### VideoEditor UI
+- `search_photos` for location, people, date range, and tag queries
+- `get_photo` for full photo metadata and URLs
+- `search_videos` for filmed location, date, category, and tag queries
+- `get_journal_entries` for date-range or location lookup
+- `get_destinations` for the travel timeline
+- `export_catalog` for filtered export across photos, videos, and journals
 
-- YouTube thumbnail, title, description (read-only from YouTube)
-- View/like/comment counts + "Refresh Stats" button
-- Short/Longform badge with manual override
-- `video_category` selector: Travel | Sponsored | Review | Other
-- Filmed date fields
-- "Ask AI" button → shows suggestion with reasoning → Confirm / Override
-- Filmed location fields (city, country)
-- People selector, tag input, notes for AI
-- AI caption + alt text (same as PhotoEditor)
-
-### ExportView additions
-
-- "Check for New Videos" button → calls `/api/videos/sync`
-- "Refresh All Stats" button → calls `/api/videos/refresh-stats`
-- Shows video counts: total, shorts, longform, by category
-
----
-
-## Key Decisions — Do Not Revisit
-
-- SQLite over hosted DB
-- Cloudflare R2 over AWS S3 — owner does not use AWS
-- Public R2 URLs
-- Soft deletes only
-- Nominatim over paid geocoding
-- sips for HEIC — macOS native
-- No TypeScript
-- Express serves React build in production
-- Timeline is the primary view — destinations are the spine
-- `video_type` (short/longform) and `video_category` (travel/sponsored/etc) are separate fields
-- Sponsored/brand videos never require filmed date or location
-- YouTube channel ID and API key both in .env, not in settings table
+Implementation can either use Anthropic MCP server utilities or a manual JSON-RPC handler. Neither is in place yet.

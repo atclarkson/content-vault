@@ -33,6 +33,7 @@ function buildPayload({
   title,
   altText,
   notesForAi,
+  subtitlesText,
   dateFilmed,
   dateFilmedEnd,
   dateFilmedSource,
@@ -46,6 +47,7 @@ function buildPayload({
     title,
     alt_text: altText,
     notes_for_ai: notesForAi,
+    subtitles_text: subtitlesText,
     date_filmed: dateFilmed || null,
     date_filmed_end: dateFilmedEnd || null,
     date_filmed_source: dateFilmedSource,
@@ -77,6 +79,7 @@ export default function VideoEditor({
   const [title, setTitle] = useState(video?.title || "");
   const [altText, setAltText] = useState(video?.alt_text || "");
   const [aiCaption, setAiCaption] = useState(video?.ai_caption || "");
+  const [subtitlesText, setSubtitlesText] = useState(video?.subtitles_text || "");
   const [notesForAi, setNotesForAi] = useState(video?.notes_for_ai || "");
   const [selectedPeopleIds, setSelectedPeopleIds] = useState((video?.people || []).map((person) => person.id));
   const [tagNames, setTagNames] = useState(video?.tags || []);
@@ -104,6 +107,7 @@ export default function VideoEditor({
     setTitle(video?.title || "");
     setAltText(video?.alt_text || "");
     setAiCaption(video?.ai_caption || "");
+    setSubtitlesText(video?.subtitles_text || "");
     setNotesForAi(video?.notes_for_ai || "");
     setSelectedPeopleIds((video?.people || []).map((person) => person.id));
     setTagNames(video?.tags || []);
@@ -119,6 +123,7 @@ export default function VideoEditor({
       title: video.title || "",
       altText: video.alt_text || "",
       notesForAi: video.notes_for_ai || "",
+      subtitlesText: video.subtitles_text || "",
       dateFilmed: formatDateForInput(video.date_filmed),
       dateFilmedEnd: formatDateForInput(video.date_filmed_end),
       dateFilmedSource: video.date_filmed_source || "none",
@@ -140,6 +145,7 @@ export default function VideoEditor({
     title,
     altText,
     notesForAi,
+    subtitlesText,
     dateFilmed,
     dateFilmedEnd,
     dateFilmedSource,
@@ -152,6 +158,7 @@ export default function VideoEditor({
     title,
     altText,
     notesForAi,
+    subtitlesText,
     dateFilmed,
     dateFilmedEnd,
     dateFilmedSource,
@@ -637,6 +644,19 @@ export default function VideoEditor({
               value={notesForAi}
               onChange={(event) => setNotesForAi(event.target.value)}
               className="field min-h-[120px] resize-y"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Subtitles</span>
+            <span className="mb-2 block text-sm text-stone-500">
+              Paste subtitles or transcript text here. This is included in exports.
+            </span>
+            <textarea
+              value={subtitlesText}
+              onChange={(event) => setSubtitlesText(event.target.value)}
+              className="field min-h-[220px] resize-y font-mono text-[13px] leading-6"
+              placeholder="Paste subtitles or transcript text here."
             />
           </label>
 

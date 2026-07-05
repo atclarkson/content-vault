@@ -52,6 +52,18 @@ export async function getPhotos(filters = {}) {
   return request(`/api/photos${buildQueryString(filters)}`);
 }
 
+export async function queryPhotos(query = {}) {
+  return jsonRequest("/api/photos/query", "POST", query);
+}
+
+export async function queryVideos(query = {}) {
+  return jsonRequest("/api/videos/query", "POST", query);
+}
+
+export async function queryJournalEntries(query = {}) {
+  return jsonRequest("/api/journal-entries/query", "POST", query);
+}
+
 export async function getPhoto(id) {
   return request(`/api/photos/${id}`);
 }
@@ -174,7 +186,7 @@ export async function deleteTag(id) {
 }
 
 export async function getDestinations() {
-  return request("/api/destinations");
+  return request("/api/destinations/raw");
 }
 
 export async function getJournalEntries() {
@@ -295,6 +307,110 @@ export async function importDayOne(file) {
 
     xhr.send(formData);
   });
+}
+
+function parseSseEvents(buffer) {
+  const segments = buffer.split("\n\n");
+  const remainder = segments.pop() || "";
+  const events = [];
+
+  for (const segment of segments) {
+    const lines = segment
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const dataLine = lines.find((line) => line.startsWith("data:"));
+
+    if (!dataLine) {
+      continue;
+    }
+
+    const payload = dataLine.slice(5).trim();
+
+    if (!payload) {
+      continue;
+    }
+
+    try {
+      events.push(JSON.parse(payload));
+    } catch {
+      throw new Error("Invalid streaming response from Day One import");
+    }
+  }
+
+  return {
+    events,
+    remainder
+  };
+}
+
+export async function streamDayOneImport(file, { onEvent }) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/import/day-one", {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+
+    try {
+      const payload = text ? JSON.parse(text) : null;
+      throw new Error(payload?.error || "Day One import failed");
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error("Day One import failed");
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error("Day One import failed");
+    }
+  }
+
+  if (!response.body) {
+    throw new Error("Streaming response not available");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completePayload = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    const parsed = parseSseEvents(buffer);
+    buffer = parsed.remainder;
+
+    for (const event of parsed.events) {
+      onEvent(event);
+
+      if (event.type === "complete") {
+        completePayload = event;
+      }
+
+      if (event.type === "error") {
+        throw new Error(event.error || "Day One import failed");
+      }
+    }
+  }
+
+  if (!completePayload) {
+    throw new Error("Day One import did not complete");
+  }
+
+  return completePayload;
 }
 
 export async function exportCatalog(filters = {}) {

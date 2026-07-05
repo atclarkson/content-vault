@@ -519,6 +519,15 @@ export default function TimelineView({ people, tags, tagGroups }) {
 
     return [...pendingPhotos].reverse();
   }, [analyzeQueueOrder, sortDirection, visiblePhotosInOrder]);
+  const analyzeQueueStartPhotoId = useMemo(() => {
+    const selectedPhotoId = editingPhoto?.id || null;
+
+    if (selectedPhotoId && analyzeQueuePhotos.some((photo) => photo.id === selectedPhotoId)) {
+      return selectedPhotoId;
+    }
+
+    return null;
+  }, [analyzeQueuePhotos, editingPhoto?.id]);
 
   function navigateEditingPhoto(direction) {
     if (!editingPhoto || visiblePhotosInOrder.length === 0) {
@@ -928,6 +937,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
       <AnalyzeQueueModal
         isOpen={isAnalyzeQueueOpen}
         photos={analyzeQueuePhotos}
+        startPhotoId={analyzeQueueStartPhotoId}
         people={people}
         tags={tags}
         tagGroups={tagGroups}

@@ -276,12 +276,20 @@ function ensureVideoTables(database) {
       filmed_location_source TEXT DEFAULT 'none' CHECK (filmed_location_source IN ('none', 'manual', 'ai_suggested', 'confirmed')),
       alt_text TEXT,
       ai_caption TEXT,
+      subtitles_text TEXT,
       notes_for_ai TEXT,
       deleted_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  ensureTableColumns(database, "videos", [
+    {
+      name: "subtitles_text",
+      sql: "ALTER TABLE videos ADD COLUMN subtitles_text TEXT"
+    }
+  ]);
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS video_people (

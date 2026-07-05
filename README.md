@@ -47,7 +47,139 @@ npm run dev
 
 The Express app runs at `http://localhost:3000`. Vite runs alongside it for the frontend during development.
 
+## Run Without VSCode
+
+For normal local use, you do not need the dev server.
+
+### Option 1: One command
+
+```bash
+npm run start:local
+```
+
+That builds the frontend and starts the Express app on `http://localhost:3000`.
+
+### Option 2: Double-click launcher on macOS
+
+Use [start-content-vault.command](/Users/adamclarkson/dev/content-vault/start-content-vault.command:1).
+
+- Double-click it in Finder.
+- It installs dependencies if needed.
+- It rebuilds the frontend.
+- It starts the app in a Terminal window.
+
+### Option 3: Always run in the background with `launchd`
+
+1. Build the frontend once:
+
+```bash
+npm run build:client
+```
+
+2. Copy the plist into your LaunchAgents folder:
+
+```bash
+cp /Users/adamclarkson/dev/content-vault/launchd/com.adamclarkson.content-vault.plist ~/Library/LaunchAgents/
+```
+
+3. Load it:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.adamclarkson.content-vault.plist
+```
+
+4. Open `http://localhost:3000`.
+
+Useful commands:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.adamclarkson.content-vault.plist
+launchctl kickstart -k gui/$(id -u)/com.adamclarkson.content-vault
+tail -f ~/Library/Logs/content-vault.log
+tail -f ~/Library/Logs/content-vault-error.log
+```
+
+`launchd` uses [scripts/run-local.sh](/Users/adamclarkson/dev/content-vault/scripts/run-local.sh:1), which starts the server and auto-builds the client only if `client/dist` is missing. After frontend code changes, run `npm run build:client` again before restarting the service.
+
+## Import Large Day One Exports
+
+The browser upload importer is only suitable for smaller archives. For large Day One exports, use the local importer script, which reads from disk and supports either a zip file path or an extracted folder path.
+
+```bash
+npm run import:dayone -- /Users/adamclarkson/Downloads/06-07-2026_15-38-.zip
+```
+
+The importer:
+
+- reads the zip from disk instead of loading the whole file into browser memory
+- skips video assets automatically
+- imports journal text and photos only
+- prints ongoing progress in Terminal
+- shows a scan summary first, including image/video counts and largest files
+
+If you want to import journal text without bringing in photos yet:
+
+```bash
+npm run import:dayone -- /Users/adamclarkson/Downloads/06-07-2026_15-38-.zip --skip-photos
+```
+
 ## How To Use It
+
+## Query API For AI Workflows
+
+Use `POST /api/photos/query` when an AI tool needs to ask for photos with structured filters instead of reusing UI query strings.
+
+Example request:
+
+```json
+{
+  "filters": {
+    "text": "beach sunset",
+    "people_any": ["Lindsay", "Lily"],
+    "tags_all": ["hawaii"],
+    "country": "Japan",
+    "date_from": "2024-01-01",
+    "date_to": "2024-12-31",
+    "missing": ["alt_text"],
+    "has_location": true
+  },
+  "sort": "newest",
+  "limit": 24,
+  "offset": 0,
+  "view": "summary"
+}
+```
+
+Supported filters:
+
+- `text`: case-insensitive search across title, description, AI caption, alt text, notes, city, country, tags, and people names
+- `ids`: exact photo ids
+- `people_all`, `people_any`
+- `tags_all`, `tags_any`
+- `city`, `country`
+- `date_from`, `date_to`
+- `processing_status`, `geo_status`
+- `missing`: `city`, `country`, `people`, `tags`, `title`, `alt_text`, `ai_caption`
+- `has_people`, `has_tags`, `has_location`
+- `include_deleted`
+
+Response shape:
+
+```json
+{
+  "data": {
+    "items": [],
+    "total": 0,
+    "limit": 24,
+    "offset": 0,
+    "sort": "newest",
+    "view": "summary",
+    "applied_filters": {}
+  }
+}
+```
+
+Use `view: "summary"` for lightweight browsing by an AI writer and `view: "full"` if you want the same full photo payload the UI uses.
 
 ### Upload
 
