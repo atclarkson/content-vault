@@ -1,5 +1,6 @@
 const path = require("path");
 const express = require("express");
+const { requireApiAuth } = require("./lib/auth");
 const { initializeDatabase } = require("./lib/db");
 require("dotenv").config();
 
@@ -10,6 +11,7 @@ const clientDistPath = path.join(__dirname, "..", "client", "dist");
 initializeDatabase();
 
 app.use(express.json());
+app.use("/api", requireApiAuth);
 
 // API routes
 app.get("/api/health", (req, res) => {
