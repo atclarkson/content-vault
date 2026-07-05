@@ -1,5 +1,13 @@
+const API_KEY = import.meta.env.VITE_API_KEY;
+
 async function request(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...options.headers,
+      "x-api-key": API_KEY
+    }
+  });
   const data = await parseJson(response);
 
   if (!response.ok) {
@@ -99,7 +107,8 @@ export async function getPhotoCorrectionPreview(id, editRecipe, options = {}) {
   const response = await fetch(`/api/photos/${id}/correction-preview`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY
     },
     body: JSON.stringify({
       edit_recipe: editRecipe,
@@ -245,6 +254,7 @@ export async function importDestinations(file) {
     const xhr = new XMLHttpRequest();
 
     xhr.open("POST", "/api/destinations/import");
+    xhr.setRequestHeader("x-api-key", API_KEY);
     xhr.responseType = "text";
 
     xhr.onload = () => {
@@ -281,6 +291,7 @@ export async function importDayOne(file) {
     const xhr = new XMLHttpRequest();
 
     xhr.open("POST", "/api/import/day-one");
+    xhr.setRequestHeader("x-api-key", API_KEY);
     xhr.responseType = "text";
 
     xhr.onload = () => {
@@ -350,6 +361,9 @@ export async function streamDayOneImport(file, { onEvent }) {
 
   const response = await fetch("/api/import/day-one", {
     method: "POST",
+    headers: {
+      "x-api-key": API_KEY
+    },
     body: formData
   });
 
@@ -428,6 +442,7 @@ export async function uploadPhotos(files, onProgress) {
     const xhr = new XMLHttpRequest();
 
     xhr.open("POST", "/api/upload");
+    xhr.setRequestHeader("x-api-key", API_KEY);
     xhr.responseType = "text";
 
     if (onProgress) {
