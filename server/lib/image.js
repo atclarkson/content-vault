@@ -100,8 +100,9 @@ async function processImage(buffer, originalFilename, options = {}) {
   const extension = getNormalizedExtension(originalFilename);
   let workingBuffer = buffer;
   const editRecipe = options.editRecipe || null;
+  const isMacOs = os.platform() === "darwin";
 
-  if (extension === ".heic" || extension === ".heif") {
+  if (isMacOs && (extension === ".heic" || extension === ".heif")) {
     workingBuffer = await convertHeicWithSips(buffer);
   }
 
