@@ -21,6 +21,16 @@ const CONTENT_TYPE_OPTIONS = [
   { id: "journal", label: "Journal", disabled: false }
 ];
 
+const TIMELINE_SECTION_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "1200px"
+};
+
+const TIMELINE_CARD_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "260px"
+};
+
 function formatMonthRange(dateStart, dateEnd) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     day: "numeric",
@@ -893,7 +903,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   visiblePhotos.length > 0 || visibleVideos.length > 0 || visibleJournalEntries.length > 0;
 
                 return (
-                  <section key={destination.id} className="border border-stone-300 bg-white">
+                  <section key={destination.id} style={TIMELINE_SECTION_STYLE} className="border border-stone-300 bg-white">
                     <div className="border-b border-stone-200 px-5 py-4">
                       <div className="flex flex-wrap items-end justify-between gap-4">
                         <div>
@@ -980,7 +990,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
               })}
 
               {contentType !== "photos" && contentType !== "journal" && groupedTimeline.brandedVideos.length > 0 ? (
-                <section className="border border-stone-300 bg-white">
+                <section style={TIMELINE_SECTION_STYLE} className="border border-stone-300 bg-white">
                   <div className="border-b border-stone-200 px-5 py-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Brand & Sponsored Content</p>
                     <h2 className="mt-2 text-2xl font-semibold text-stone-900">Brand & Sponsored Content</h2>
@@ -1002,7 +1012,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
               ) : null}
 
               {!showNoContentDestinations ? (
-                <section className="border border-stone-300 bg-white">
+                <section style={TIMELINE_SECTION_STYLE} className="border border-stone-300 bg-white">
                   <div className="border-b border-stone-200 px-5 py-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Undated</p>
                     <h2 className="mt-2 text-2xl font-semibold text-stone-900">Undated Content</h2>
@@ -1074,7 +1084,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
               ) : null}
 
               {showNoContentDestinations && displayedDestinations.length === 0 ? (
-                <section className="border border-stone-300 bg-white px-5 py-8 text-sm text-stone-500">
+                <section style={TIMELINE_SECTION_STYLE} className="border border-stone-300 bg-white px-5 py-8 text-sm text-stone-500">
                   No destinations are currently missing content.
                 </section>
               ) : null}
@@ -1238,6 +1248,7 @@ function VideoGrid({ videos, onVideoClick }) {
       {videos.map((video) => (
         <article
           key={video.id}
+          style={TIMELINE_CARD_STYLE}
           className="group relative overflow-hidden rounded-[1.75rem] border border-stone-300 bg-stone-100 transition hover:border-stone-400"
         >
           <button type="button" onClick={() => onVideoClick(video)} className="block w-full text-left">
@@ -1286,7 +1297,7 @@ function JournalEntryList({ entries, expandedIds, onToggleExpand }) {
         ].filter(Boolean).join(" · ");
 
         return (
-          <article key={entry.id} className="border border-stone-300 bg-stone-50 px-4 py-4">
+          <article key={entry.id} style={TIMELINE_CARD_STYLE} className="border border-stone-300 bg-stone-50 px-4 py-4">
             <div className="flex items-start gap-3">
               <div className="text-xl leading-none">📓</div>
               <div className="min-w-0 flex-1">

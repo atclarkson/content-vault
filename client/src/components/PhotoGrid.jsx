@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 import { appendPhotoVersion } from "../photoUrls";
 
+const PHOTO_TILE_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "260px"
+};
+
 const SORT_OPTIONS = [
   { id: "newest", label: "Newest First" },
   { id: "oldest", label: "Oldest First" },
@@ -219,6 +224,7 @@ export default function PhotoGrid({
                 onPointerDown={(event) => handleTilePointerDown(event, photo.id, isSelected)}
                 onPointerMove={(event) => handleTilePointerMove(event, photo.id)}
                 onPointerEnter={(event) => handleTilePointerEnter(event, photo.id)}
+                style={PHOTO_TILE_STYLE}
                 className={`group relative overflow-hidden rounded-[1.75rem] border bg-stone-100 transition ${
                   isSelected
                     ? "border-amber-400 ring-2 ring-amber-300/80"
