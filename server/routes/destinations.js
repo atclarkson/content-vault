@@ -174,6 +174,18 @@ router.post("/import", upload.single("file"), (req, res) => {
   }
 });
 
+router.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({ error: error.code });
+  }
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  next();
+});
+
 function headersMatch(actual, expected) {
   if (actual.length !== expected.length) {
     return false;

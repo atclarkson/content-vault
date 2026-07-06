@@ -231,6 +231,8 @@ router.use((error, req, res, next) => {
         .status(400)
         .json({ error: "Each file must be 50MB or smaller" });
     }
+
+    return res.status(400).json({ error: error.code });
   }
 
   if (error) {

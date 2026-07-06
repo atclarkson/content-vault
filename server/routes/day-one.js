@@ -304,6 +304,10 @@ router.use((error, req, res, next) => {
     return res.status(400).json({ error: "Zip file must be 500MB or smaller" });
   }
 
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({ error: error.code });
+  }
+
   if (error) {
     return res.status(500).json({ error: error.message });
   }
