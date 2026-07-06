@@ -461,32 +461,9 @@ export default function PhotoEditor({
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-l border-stone-300 bg-white">
-      <div className="flex items-start justify-between border-b border-stone-200 px-6 py-5">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Photo Editor</p>
-          <h2 className="mt-2 text-lg font-semibold text-stone-900">{photo.original_filename}</h2>
-          <p className="mt-2 text-sm text-stone-500">
-            {saveState === "saving" && "Saving changes..."}
-            {saveState === "saved" && "Changes saved"}
-            {saveState === "dirty" && "Waiting to save..."}
-            {saveState === "error" && "Save failed"}
-            {saveState === "idle" && "Ready"}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-700 transition hover:border-stone-400 hover:bg-stone-100"
-          aria-label="Close editor"
-        >
-          <i className="ti ti-x text-base" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="border-b border-stone-200 px-6 py-5">
-        <div className="overflow-hidden border border-stone-300 bg-stone-100">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-x-hidden overflow-y-hidden border-l border-stone-300 bg-white">
+      <div className="border-b border-stone-200 px-4 py-4 lg:px-6 lg:py-5">
+        <div className="relative overflow-hidden border border-stone-300 bg-stone-100">
           {photo.large_url ? (
             <button
               type="button"
@@ -503,10 +480,34 @@ export default function PhotoEditor({
           ) : (
             <div className="flex h-[220px] items-center justify-center text-sm text-stone-500">No image available</div>
           )}
+
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 bg-gradient-to-b from-stone-950/60 via-stone-950/25 to-transparent p-3 lg:p-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-white lg:text-base">
+                {photo.original_filename}
+              </h2>
+              {(saveState === "saving" || saveState === "saved" || saveState === "error") ? (
+                <p className="mt-1 text-xs text-white/80">
+                  {saveState === "saving" && "Saving changes..."}
+                  {saveState === "saved" && "Changes saved"}
+                  {saveState === "error" && "Save failed"}
+                </p>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="pointer-events-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow-sm transition hover:bg-white"
+              aria-label="Close editor"
+            >
+              <i className="ti ti-x text-base" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 lg:px-6">
         <div className="space-y-5">
           <section>
             <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">People</p>
@@ -674,18 +675,17 @@ export default function PhotoEditor({
           </details>
 
           {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-        </div>
-      </div>
 
-      <div className="border-t border-stone-200 px-6 py-4">
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={isSaving || isDeleting}
-          className="inline-flex w-full items-center justify-center rounded-2xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isDeleting ? "Deleting..." : "Delete"}
-        </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isSaving || isDeleting}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <i className="ti ti-trash text-base" aria-hidden="true" />
+            <span>{isDeleting ? "Deleting..." : "Delete"}</span>
+          </button>
+        </div>
       </div>
 
       {isLightboxOpen ? (
