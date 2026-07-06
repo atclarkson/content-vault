@@ -10,14 +10,15 @@
   }
 
   body {
-    @apply bg-stone-100 text-stone-900 antialiased;
+    @apply bg-slate-100 text-stone-900 antialiased;
     background-image:
-      radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 28%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(245, 245, 244, 0.92));
+      radial-gradient(circle at top left, rgba(21, 84, 187, 0.18), transparent 34%),
+      radial-gradient(circle at top right, rgba(15, 154, 168, 0.16), transparent 30%),
+      linear-gradient(180deg, rgba(247, 252, 255, 0.96), rgba(236, 246, 249, 0.94));
   }
 
   ::selection {
-    @apply bg-amber-300 text-stone-950;
+    @apply bg-cyan-200 text-stone-950;
   }
 }
 
