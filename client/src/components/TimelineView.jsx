@@ -131,7 +131,24 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    () => window.matchMedia("(max-width: 1023.98px)").matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    const handler = (event) => setIsMobile(event.matches);
+
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  return isMobile;
+}
+
 export default function TimelineView({ people, tags, tagGroups }) {
+  const isMobile = useIsMobile();
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -150,7 +167,13 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [expandedJournalEntryIds, setExpandedJournalEntryIds] = useState(new Set());
   const [isAnalyzeQueueOpen, setIsAnalyzeQueueOpen] = useState(false);
   const [analyzeQueueOrder, setAnalyzeQueueOrder] = useState("newest");
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [activeFilterCount, setActiveFilterCount] = useState(0);
   const contentScrollRef = useRef(null);
+  const filterSheetStartYRef = useRef(0);
+  const filterSheetCanDragRef = useRef(false);
+  const filterSheetScrollRef = useRef(null);
+  const [filterSheetOffsetY, setFilterSheetOffsetY] = useState(0);
 
   function syncLoadedPhotos(nextPhotos, { resetSelection = false } = {}) {
     setPhotos(nextPhotos);
@@ -364,6 +387,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
     ], "country")
   }), [photos, videos]);
   const isBulkEditing = selectedIds.size > 1;
+  const hasActiveEditorContent = isBulkEditing || Boolean(editingVideo) || Boolean(editingPhoto);
   const hasActiveFilters = Object.entries(filters).some(([, value]) => {
     if (value === undefined || value === null) {
       return false;
@@ -550,98 +574,260 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setEditingPhoto(visiblePhotosInOrder[nextIndex]);
   }
 
+  function closeFilterPanel() {
+    setIsFilterPanelOpen(false);
+    setFilterSheetOffsetY(0);
+  }
+
+  function handleFilterSheetTouchStart(event) {
+    if (!isMobile || !isFilterPanelOpen) {
+      return;
+    }
+
+    filterSheetCanDragRef.current = (filterSheetScrollRef.current?.scrollTop || 0) <= 0;
+    filterSheetStartYRef.current = event.touches[0]?.clientY || 0;
+  }
+
+  function handleFilterSheetTouchMove(event) {
+    if (!isMobile || !isFilterPanelOpen) {
+      return;
+    }
+
+    const currentY = event.touches[0]?.clientY || 0;
+    const nextOffset = Math.max(0, currentY - filterSheetStartYRef.current);
+
+    if (!filterSheetCanDragRef.current || nextOffset === 0) {
+      return;
+    }
+
+    setFilterSheetOffsetY(nextOffset);
+  }
+
+  function handleFilterSheetTouchEnd() {
+    if (!isMobile || !isFilterPanelOpen) {
+      return;
+    }
+
+    filterSheetCanDragRef.current = false;
+
+    if (filterSheetOffsetY > 80) {
+      closeFilterPanel();
+      return;
+    }
+
+    setFilterSheetOffsetY(0);
+  }
+
   return (
     <>
       <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <PhotoFilters
-          people={people}
-          tags={tags}
-          locationOptions={locationOptions}
-          onApply={handleApplyFilters}
-          onClear={handleClearFilters}
-        />
-
         <section className="panel mb-4 px-5 py-4">
-          <div className="flex flex-wrap items-end justify-between gap-6">
-            <div className="flex flex-wrap gap-6">
-              <div>
-                <p className="mb-2 text-xs uppercase tracking-[0.24em] text-stone-500">Sort</p>
-                <div className="flex gap-2">
+          <div className="hidden flex-wrap items-center justify-between gap-4 lg:flex">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex overflow-hidden rounded-xl border border-stone-300 bg-white">
+                {CONTENT_TYPE_OPTIONS.map((option) => (
                   <button
+                    key={option.id}
                     type="button"
-                    onClick={() => setSortDirection("newest")}
-                    className={sortDirection === "newest" ? "btn-primary" : "btn-secondary"}
+                    disabled={option.disabled}
+                    onClick={() => {
+                      if (!option.disabled) {
+                        setContentType(option.id);
+                      }
+                    }}
+                    className={`px-3.5 py-2 text-sm font-medium transition ${
+                      option.disabled
+                        ? "text-stone-400"
+                        : contentType === option.id
+                          ? "bg-stone-900 text-stone-50"
+                          : "text-stone-600 hover:bg-stone-50 hover:text-stone-900"
+                    } ${option.id !== CONTENT_TYPE_OPTIONS[CONTENT_TYPE_OPTIONS.length - 1].id ? "border-r border-stone-300" : ""}`}
                   >
-                    Newest First
+                    {option.label}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setSortDirection("oldest")}
-                    className={sortDirection === "oldest" ? "btn-primary" : "btn-secondary"}
-                  >
-                    Oldest First
-                  </button>
-                </div>
+                ))}
               </div>
 
-              <div>
-                <p className="mb-2 text-xs uppercase tracking-[0.24em] text-stone-500">Content</p>
-                <div className="flex gap-2">
-                  {CONTENT_TYPE_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      disabled={option.disabled}
-                      onClick={() => {
-                        if (!option.disabled) {
-                          setContentType(option.id);
-                        }
-                      }}
-                      className={
-                        option.disabled
-                          ? "btn-secondary opacity-50"
-                          : contentType === option.id
-                            ? "btn-primary"
-                            : "btn-secondary"
-                      }
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <label className="relative block w-[180px]">
+                <select
+                  value={sortDirection}
+                  onChange={(event) => setSortDirection(event.target.value)}
+                  className="field appearance-none pr-10"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                </select>
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-stone-500">
+                  <i className="ti ti-chevron-down text-base" />
+                </span>
+              </label>
             </div>
 
-            <div>
-              <p className="mb-2 text-xs uppercase tracking-[0.24em] text-stone-500">Analyze</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAnalyzeQueueOrder("newest")}
-                  className={analyzeQueueOrder === "newest" ? "btn-primary" : "btn-secondary"}
-                >
-                  Newest First
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAnalyzeQueueOrder("oldest")}
-                  className={analyzeQueueOrder === "oldest" ? "btn-primary" : "btn-secondary"}
-                >
-                  Oldest First
-                </button>
-              </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsFilterPanelOpen((currentValue) => !currentValue)}
+                className="btn-secondary gap-3"
+                aria-expanded={isFilterPanelOpen}
+              >
+                <i className="ti ti-adjustments-horizontal text-base" aria-hidden="true" />
+                <span>Filters</span>
+                <span className="rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700">
+                  {activeFilterCount}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsAnalyzeQueueOpen(true)}
                 disabled={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0}
-                className={`mt-2 ${contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "btn-secondary opacity-50" : "btn-primary"}`}
+                className={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "btn-secondary gap-3 opacity-50" : "ai-button"}
               >
-                Analyze Queue ({analyzeQueuePhotos.length})
+                <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                <span>Analyze Queue</span>
+                <span
+                  className={
+                    contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0
+                      ? "rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700"
+                      : "rounded-full bg-white/15 px-2 py-0.5 text-xs text-stone-50"
+                  }
+                >
+                  {analyzeQueuePhotos.length}
+                </span>
               </button>
             </div>
           </div>
+
+          <div className="space-y-3 lg:hidden">
+            <div className="inline-flex w-full overflow-hidden rounded-xl border border-stone-300 bg-white">
+              {CONTENT_TYPE_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={option.disabled}
+                  onClick={() => {
+                    if (!option.disabled) {
+                      setContentType(option.id);
+                    }
+                  }}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition ${
+                    option.disabled
+                      ? "text-stone-400"
+                      : contentType === option.id
+                        ? "bg-stone-900 text-stone-50"
+                        : "text-stone-600 hover:bg-stone-50 hover:text-stone-900"
+                  } ${option.id !== CONTENT_TYPE_OPTIONS[CONTENT_TYPE_OPTIONS.length - 1].id ? "border-r border-stone-300" : ""}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsFilterPanelOpen((currentValue) => !currentValue)}
+                className="btn-secondary flex-1 justify-between gap-3"
+                aria-expanded={isFilterPanelOpen}
+              >
+                <span className="inline-flex items-center gap-3">
+                  <i className="ti ti-adjustments-horizontal text-base" aria-hidden="true" />
+                  <span>Sort &amp; filters</span>
+                </span>
+                <span className="rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700">
+                  {activeFilterCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAnalyzeQueueOpen(true)}
+                disabled={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0}
+                aria-label={`Analyze Queue ${analyzeQueuePhotos.length}`}
+                className={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "btn-secondary gap-2 opacity-50" : "ai-button gap-2 px-3"}
+              >
+                <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                <span className={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700" : "rounded-full bg-white/15 px-2 py-0.5 text-xs text-stone-50"}>
+                  {analyzeQueuePhotos.length}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            className={`lg:static lg:z-auto lg:translate-y-0 ${
+              isMobile
+                ? `fixed inset-x-0 bottom-0 z-50 rounded-t-[1.75rem] border border-stone-300 bg-white ${
+                    isFilterPanelOpen ? "pointer-events-auto" : "pointer-events-none"
+                  }`
+                : ""
+            } lg:rounded-none lg:border-0 lg:bg-transparent`}
+            onTouchStart={handleFilterSheetTouchStart}
+            onTouchMove={handleFilterSheetTouchMove}
+            onTouchEnd={handleFilterSheetTouchEnd}
+            style={{
+              transform: isMobile
+                ? (isFilterPanelOpen ? `translateY(${filterSheetOffsetY}px)` : "translateY(calc(100% + 2rem))")
+                : "translateY(0)",
+              transition: isMobile && filterSheetOffsetY > 0 ? "none" : "transform 180ms ease-out"
+            }}
+          >
+            <div
+              ref={filterSheetScrollRef}
+              className="max-h-[82vh] overflow-y-auto lg:max-h-none lg:overflow-visible"
+            >
+              <div className="relative px-5 pt-3 lg:hidden">
+                <div className="mx-auto h-1.5 w-12 rounded-full bg-stone-300" />
+                <button
+                  type="button"
+                  onClick={closeFilterPanel}
+                  className="absolute right-5 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-700"
+                  aria-label="Close sort and filters"
+                >
+                  <i className="ti ti-x text-base" aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="px-5 pb-6 pt-2 lg:hidden">
+                <label className="block w-full">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Sort</span>
+                  <div className="relative">
+                    <select
+                      value={sortDirection}
+                      onChange={(event) => setSortDirection(event.target.value)}
+                      className="field appearance-none pr-10"
+                    >
+                      <option value="newest">Newest First</option>
+                      <option value="oldest">Oldest First</option>
+                    </select>
+                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-stone-500">
+                      <i className="ti ti-chevron-down text-base" />
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <PhotoFilters
+                people={people}
+                tags={tags}
+                locationOptions={locationOptions}
+                onApply={handleApplyFilters}
+                onClear={handleClearFilters}
+                isOpen={isFilterPanelOpen}
+                onActiveFilterCountChange={setActiveFilterCount}
+                wrapperClassName="px-5 pb-6 pt-5 lg:border-t lg:border-stone-200 lg:px-5 lg:py-5"
+              />
+            </div>
+          </div>
         </section>
+
+        <div
+          className={`fixed inset-0 z-40 bg-stone-950/35 transition lg:hidden ${
+            isMobile && isFilterPanelOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
+          onClick={closeFilterPanel}
+        />
 
         {error ? (
           <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -897,7 +1083,13 @@ export default function TimelineView({ people, tags, tagGroups }) {
         )}
       </div>
 
-      <div className="hidden min-h-0 w-[560px] shrink-0 xl:flex">
+      <div
+        className={
+          hasActiveEditorContent
+            ? "fixed inset-0 z-[60] flex min-h-0 flex-col bg-white xl:static xl:z-auto xl:w-[560px] xl:shrink-0 xl:flex"
+            : "hidden min-h-0 xl:flex xl:w-[560px] xl:shrink-0"
+        }
+      >
         {isBulkEditing ? (
           <BulkActionBar
             selectedIds={selectedIds}

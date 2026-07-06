@@ -1,3 +1,5 @@
+const { normalizePlaceName } = require("./placeNames");
+
 let lastRequestAt = 0;
 
 function sleep(ms) {
@@ -46,10 +48,10 @@ async function reverseGeocode(lat, lng) {
     const address = data.address || {};
 
     return {
-      neighborhood: pickFirst(address, ["neighbourhood", "suburb", "quarter"]),
-      city: pickFirst(address, ["city", "town", "village", "municipality"]),
-      region: address.state || null,
-      country: address.country || null,
+      neighborhood: normalizePlaceName(pickFirst(address, ["neighbourhood", "suburb", "quarter"])),
+      city: normalizePlaceName(pickFirst(address, ["city", "town", "village", "municipality"])),
+      region: normalizePlaceName(address.state || null),
+      country: normalizePlaceName(address.country || null),
     };
   } catch (error) {
     return null;

@@ -475,8 +475,13 @@ export default function PhotoEditor({
           </p>
         </div>
 
-        <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 text-sm" aria-label="Clear editor">
-          Clear
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-700 transition hover:border-stone-400 hover:bg-stone-100"
+          aria-label="Close editor"
+        >
+          <i className="ti ti-x text-base" aria-hidden="true" />
         </button>
       </div>
 
@@ -503,77 +508,6 @@ export default function PhotoEditor({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="space-y-5">
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Title</span>
-            <input type="text" value={title} onChange={(event) => setTitle(event.target.value)} className="field" />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Description</span>
-            <span className="mb-2 block text-sm text-stone-500">
-              Public-facing. This may appear in blog content.
-            </span>
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              className="field min-h-[120px] resize-y"
-            />
-          </label>
-
-          <label className="block rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-amber-800">Notes for AI</span>
-            <span className="mb-2 block text-sm text-amber-900/80">
-              Private context for caption generation. Never published.
-            </span>
-            <textarea
-              value={notesForAi}
-              onChange={(event) => setNotesForAi(event.target.value)}
-              className="field min-h-[120px] resize-y border-amber-300 bg-white/90"
-            />
-          </label>
-
-          <section className="border-t border-stone-200 pt-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Caption</p>
-                <p className="mt-2 text-sm text-stone-500">
-                  Generate or regenerate this caption from the current photo metadata.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleGenerateCaption}
-                disabled={isSaving || isDeleting || isGeneratingCaption}
-                className="btn-secondary"
-              >
-                {isGeneratingCaption ? (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />
-                    Analyzing...
-                  </span>
-                ) : "AI Analyze"}
-              </button>
-            </div>
-            <div className="mt-4 border border-stone-300 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
-              {aiCaption || "No AI caption generated yet."}
-            </div>
-          </section>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Alt Text</span>
-            <input type="text" value={altText} onChange={(event) => setAltText(event.target.value)} className="field" />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Captured Date</span>
-            <input
-              type="date"
-              value={capturedAt}
-              onChange={(event) => setCapturedAt(event.target.value)}
-              className="field"
-            />
-          </label>
-
           <section>
             <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">People</p>
             <PeopleSelector
@@ -583,11 +517,6 @@ export default function PhotoEditor({
               onPersonCreated={handlePersonCreated}
               onNoPeople={handleNoPeople}
             />
-          </section>
-
-          <section>
-            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
-            <TagInput tags={tagNames} allTags={tags} tagGroups={tagGroups} onChange={setTagNames} />
           </section>
 
           <section className="border-t border-stone-200 pt-5">
@@ -624,48 +553,139 @@ export default function PhotoEditor({
             </div>
           </section>
 
-          {showExifSection ? (
-            <section className="border-t border-stone-200 pt-5">
-              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">EXIF</p>
-              <dl className="mt-4 grid gap-3 text-sm text-stone-700">
-                {photo.camera_make ? <ExifRow label="Camera Make" value={photo.camera_make} /> : null}
-                {photo.camera_model ? <ExifRow label="Camera Model" value={photo.camera_model} /> : null}
-                {photo.focal_length ? <ExifRow label="Focal Length" value={photo.focal_length} /> : null}
-                {photo.iso ? <ExifRow label="ISO" value={photo.iso} /> : null}
-                {photo.shutter_speed ? <ExifRow label="Shutter Speed" value={photo.shutter_speed} /> : null}
-                {photo.aperture ? <ExifRow label="Aperture" value={photo.aperture} /> : null}
-              </dl>
-            </section>
-          ) : null}
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Captured Date</span>
+            <input
+              type="date"
+              value={capturedAt}
+              onChange={(event) => setCapturedAt(event.target.value)}
+              className="field"
+            />
+          </label>
+
+          <section>
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Tags</p>
+            <TagInput tags={tagNames} allTags={tags} tagGroups={tagGroups} onChange={setTagNames} />
+          </section>
+
+          <label className="block rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-amber-800">Notes for AI</span>
+            <span className="mb-2 block text-sm text-amber-900/80">
+              Private context for caption generation. Never published.
+            </span>
+            <textarea
+              value={notesForAi}
+              onChange={(event) => setNotesForAi(event.target.value)}
+              className="field min-h-[120px] resize-y border-amber-300 bg-white/90"
+            />
+          </label>
 
           <section className="border-t border-stone-200 pt-5">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Status</p>
-            <div className="mt-4 flex flex-wrap gap-3 text-sm">
-              <span className="rounded-full bg-white px-3 py-1.5 text-stone-700">
-                Processing: {photo.processing_status}
-              </span>
-              <span className="rounded-full bg-white px-3 py-1.5 text-stone-700">Geo: {photo.geo_status}</span>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Caption</p>
+                <p className="mt-2 text-sm text-stone-500">
+                  Generate or regenerate this caption from the current photo metadata.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateCaption}
+                disabled={isSaving || isDeleting || isGeneratingCaption}
+                className={isSaving || isDeleting || isGeneratingCaption ? "btn-secondary" : "ai-button"}
+              >
+                {isGeneratingCaption ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />
+                    Analyzing...
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                    AI Analyze
+                  </span>
+                )}
+              </button>
             </div>
           </section>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Title</span>
+            <input type="text" value={title} onChange={(event) => setTitle(event.target.value)} className="field" />
+          </label>
+
+          <section>
+            <p className="mb-2 text-xs uppercase tracking-[0.24em] text-stone-500">AI Caption</p>
+            <div className="border border-stone-300 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+              {aiCaption || "No AI caption generated yet."}
+            </div>
+          </section>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Alt Text</span>
+            <input type="text" value={altText} onChange={(event) => setAltText(event.target.value)} className="field" />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Description</span>
+            <span className="mb-2 block text-sm text-stone-500">
+              Public-facing. This may appear in blog content.
+            </span>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="field min-h-[120px] resize-y"
+            />
+          </label>
+
+          <details className="rounded-xl border border-stone-200 bg-stone-50/70 p-4 text-sm text-stone-700">
+            <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.24em] text-stone-500">
+              <span className="inline-flex items-center gap-2">
+                <i className="ti ti-chevron-down text-base" aria-hidden="true" />
+                Reference
+              </span>
+            </summary>
+
+            <div className="mt-4 space-y-5">
+              {showExifSection ? (
+                <section>
+                  <p className="text-xs uppercase tracking-[0.24em] text-stone-500">EXIF</p>
+                  <dl className="mt-4 grid gap-3 text-sm text-stone-700">
+                    {photo.camera_make ? <ExifRow label="Camera Make" value={photo.camera_make} /> : null}
+                    {photo.camera_model ? <ExifRow label="Camera Model" value={photo.camera_model} /> : null}
+                    {photo.focal_length ? <ExifRow label="Focal Length" value={photo.focal_length} /> : null}
+                    {photo.iso ? <ExifRow label="ISO" value={photo.iso} /> : null}
+                    {photo.shutter_speed ? <ExifRow label="Shutter Speed" value={photo.shutter_speed} /> : null}
+                    {photo.aperture ? <ExifRow label="Aperture" value={photo.aperture} /> : null}
+                  </dl>
+                </section>
+              ) : null}
+
+              <section>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Status</p>
+                <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                  <span className="rounded-full bg-white px-3 py-1.5 text-stone-700">
+                    Processing: {photo.processing_status}
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1.5 text-stone-700">Geo: {photo.geo_status}</span>
+                </div>
+              </section>
+            </div>
+          </details>
 
           {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
         </div>
       </div>
 
       <div className="border-t border-stone-200 px-6 py-4">
-        <div className="flex gap-3">
-          <div className="flex flex-1 items-center rounded-2xl bg-stone-100 px-4 py-2.5 text-sm text-stone-600">
-            Autosave is on
-          </div>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={isSaving || isDeleting}
-            className="inline-flex flex-1 items-center justify-center rounded-2xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isDeleting ? "Deleting..." : "Delete"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isSaving || isDeleting}
+          className="inline-flex w-full items-center justify-center rounded-2xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isDeleting ? "Deleting..." : "Delete"}
+        </button>
       </div>
 
       {isLightboxOpen ? (
