@@ -679,7 +679,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   : "Journal results do not use the photo filters."}
               </div>
             ) : (
-              <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+              <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
                 <PhotoGrid
                   photos={filteredPhotos}
                   onPhotoClick={(photo) => {
@@ -695,7 +695,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
             )}
           </section>
         ) : (
-          <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
             <div className="space-y-8 pb-4">
               {displayedDestinations.map((destination) => {
                 const visiblePhotos = contentType === "videos" || contentType === "journal" ? [] : destination.photos;
@@ -1054,6 +1054,8 @@ function VideoGrid({ videos, onVideoClick }) {
                 <img
                   src={video.thumbnail_url}
                   alt={video.title || "Video thumbnail"}
+                  loading="lazy"
+                  decoding="async"
                   className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
                 />
               ) : (
@@ -1097,7 +1099,7 @@ function JournalEntryList({ entries, expandedIds, onToggleExpand }) {
               <div className="text-xl leading-none">📓</div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h3 className="text-base font-semibold text-stone-900">
+                  <h3 className="min-w-0 break-words text-base font-semibold text-stone-900">
                     {entry.title || "Untitled journal entry"}
                   </h3>
                   <p className="text-sm text-stone-500">{formatJournalDate(entry.entry_date)}</p>

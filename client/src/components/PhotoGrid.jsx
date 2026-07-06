@@ -242,6 +242,8 @@ export default function PhotoGrid({
                       <img
                         src={appendPhotoVersion(photo.thumbnail_url, photo)}
                         alt={photo.alt_text || photo.original_filename || "Photo thumbnail"}
+                        loading="lazy"
+                        decoding="async"
                         draggable="false"
                         className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
                       />
