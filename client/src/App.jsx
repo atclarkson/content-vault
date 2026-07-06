@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPeople, getTagGroups, getTags } from "./api";
+import MobileNav from "./components/MobileNav";
 import Sidebar from "./components/Sidebar";
 import ExportView from "./components/ExportView";
 import ImportView from "./components/ImportView";
@@ -80,9 +81,10 @@ export default function App() {
   return (
     <div className="h-screen overflow-hidden text-stone-900">
       <Sidebar currentView={currentView} onNavigate={setCurrentView} />
+      <MobileNav currentView={currentView} onNavigate={setCurrentView} />
 
-      <main className="h-screen overflow-hidden pl-[240px]">
-        <div className="mx-auto flex h-screen w-full max-w-[1800px] flex-col overflow-hidden px-6 py-6 2xl:px-8">
+      <main className="h-screen overflow-hidden lg:pl-[240px]">
+        <div className="mx-auto flex h-screen w-full max-w-[1800px] flex-col overflow-hidden px-6 py-6 pb-16 lg:pb-0 2xl:px-8">
           {error ? (
             <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}

@@ -1,7 +1,23 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { uploadPhotos } from "../api";
 
-const ACCEPTED_FILE_TYPES = ".jpg,.jpeg,.png,.heic,.heif,.webp";
+const ACCEPTED_FILE_TYPES = "image/*,.jpg,.jpeg,.png,.heic,.heif,.webp";
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    () => window.matchMedia("(max-width: 1023.98px)").matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    const handler = (event) => setIsMobile(event.matches);
+
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  return isMobile;
+}
 
 function formatFileSize(bytes) {
   if (bytes < 1024) {
@@ -32,6 +48,10 @@ function mergeFiles(existingFiles, nextFiles) {
   }
 
   return merged;
+}
+
+function buildFileKey(file) {
+  return `${file.name}-${file.lastModified}-${file.size}`;
 }
 
 function flattenUploadResults(responseData, files) {
@@ -75,7 +95,7 @@ function flattenUploadResults(responseData, files) {
 function buildFileEntries(nextFiles) {
   return nextFiles.map((file) => ({
     file,
-    key: `${file.name}-${file.lastModified}-${file.size}`,
+    key: buildFileKey(file),
     filename: file.name,
     sizeLabel: formatFileSize(file.size),
     status: "waiting",
@@ -133,12 +153,25 @@ function buildEmptyProgressState() {
 }
 
 export default function UploadView({ onNavigate }) {
+  const isMobile = useIsMobile();
   const inputRef = useRef(null);
+  const pendingFilesRef = useRef([]);
   const [fileEntries, setFileEntries] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [progressState, setProgressState] = useState(buildEmptyProgressState);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
+
+  useEffect(() => () => {
+    pendingFilesRef.current.forEach((entry) => {
+      URL.revokeObjectURL(entry.url);
+    });
+  }, []);
 
   const totalFilesSize = useMemo(
     () => fileEntries.reduce((sum, entry) => sum + entry.file.size, 0),
@@ -161,6 +194,17 @@ export default function UploadView({ onNavigate }) {
 
   function openFilePicker() {
     inputRef.current?.click();
+  }
+
+  function revokePendingFiles(entries) {
+    entries.forEach((entry) => {
+      URL.revokeObjectURL(entry.url);
+    });
+  }
+
+  function clearPendingFiles() {
+    revokePendingFiles(pendingFilesRef.current);
+    setPendingFiles([]);
   }
 
   async function startUpload(nextFiles) {
@@ -210,6 +254,32 @@ export default function UploadView({ onNavigate }) {
   }
 
   function handleFilesSelected(nextFiles) {
+    if (isMobile) {
+      setPendingFiles((currentPendingFiles) => {
+        const existingFiles = currentPendingFiles.map((entry) => entry.file);
+        const mergedFiles = mergeFiles(existingFiles, nextFiles);
+        const existingKeys = new Set(currentPendingFiles.map((entry) => entry.key));
+        const nextPendingEntries = [];
+
+        for (const file of mergedFiles) {
+          const key = buildFileKey(file);
+
+          if (existingKeys.has(key)) {
+            continue;
+          }
+
+          nextPendingEntries.push({
+            file,
+            key,
+            url: URL.createObjectURL(file)
+          });
+        }
+
+        return [...currentPendingFiles, ...nextPendingEntries];
+      });
+      return;
+    }
+
     startUpload(nextFiles);
   }
 
@@ -229,6 +299,30 @@ export default function UploadView({ onNavigate }) {
     setError("");
     setProgressState(buildEmptyProgressState());
     setIsDragging(false);
+  }
+
+  function removePendingFile(key) {
+    setPendingFiles((currentPendingFiles) => {
+      const entryToRemove = currentPendingFiles.find((entry) => entry.key === key);
+
+      if (entryToRemove) {
+        URL.revokeObjectURL(entryToRemove.url);
+      }
+
+      return currentPendingFiles.filter((entry) => entry.key !== key);
+    });
+  }
+
+  function handleConfirmUpload() {
+    const filesToUpload = pendingFilesRef.current.map((entry) => entry.file);
+
+    if (filesToUpload.length === 0) {
+      return;
+    }
+
+    revokePendingFiles(pendingFilesRef.current);
+    setPendingFiles([]);
+    startUpload(filesToUpload);
   }
 
   return (
@@ -280,12 +374,49 @@ export default function UploadView({ onNavigate }) {
             : "border-stone-300 bg-stone-50 hover:border-stone-400 hover:bg-white"
         }`}
       >
-        <p className="text-lg font-semibold text-stone-900">Drag photos here</p>
-        <p className="mt-3 text-sm text-stone-600">or click to choose JPG, PNG, HEIC, HEIF, or WebP files</p>
-        <p className="mt-2 text-xs uppercase tracking-[0.24em] text-stone-500">Upload starts automatically</p>
+        <p className="text-lg font-semibold text-stone-900">
+          {isMobile ? "Take Photo or Choose Photos" : "Drag photos here"}
+        </p>
+        <p className="mt-3 text-sm text-stone-600">
+          {isMobile
+            ? "JPG, PNG, HEIC, HEIF, or WebP"
+            : "or click to choose JPG, PNG, HEIC, HEIF, or WebP files"}
+        </p>
+        {!isMobile ? (
+          <p className="mt-2 text-xs uppercase tracking-[0.24em] text-stone-500">Upload starts automatically</p>
+        ) : null}
       </button>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-2">
+        {isMobile && pendingFiles.length > 0 && !isUploading ? (
+          <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-4">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
+                {pendingFiles.length} photo{pendingFiles.length === 1 ? "" : "s"} selected
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {pendingFiles.map((entry) => (
+                <PendingFileTile
+                  key={entry.key}
+                  entry={entry}
+                  onRemove={removePendingFile}
+                />
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={handleConfirmUpload} className="btn-primary">
+                Upload
+              </button>
+              <button type="button" onClick={clearPendingFiles} className="btn-secondary">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {isUploading ? (
           <div className="mt-6 rounded-[1.75rem] border border-stone-300 bg-stone-50 p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -350,15 +481,17 @@ export default function UploadView({ onNavigate }) {
         {error ? <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-3">
-        <button type="button" onClick={resetUploadState} className="btn-secondary" disabled={isUploading}>
-          Upload More
-        </button>
+      {!isMobile || pendingFiles.length === 0 || isUploading ? (
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button type="button" onClick={resetUploadState} className="btn-secondary" disabled={isUploading}>
+            Upload More
+          </button>
 
-        <button type="button" onClick={() => onNavigate("photos")} className="btn-secondary" disabled={!hasCompletedUpload}>
-          View Photos
-        </button>
-      </div>
+          <button type="button" onClick={() => onNavigate("photos")} className="btn-secondary" disabled={!hasCompletedUpload}>
+            View Photos
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -368,5 +501,35 @@ function StatusPill({ label, value }) {
     <span className="rounded-full border border-stone-300 bg-white px-3 py-1.5 text-stone-700">
       {label}: {value}
     </span>
+  );
+}
+
+function PendingFileTile({ entry, onRemove }) {
+  const [hasPreviewError, setHasPreviewError] = useState(false);
+
+  return (
+    <div className="relative aspect-square overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      <button
+        type="button"
+        onClick={() => onRemove(entry.key)}
+        className="absolute right-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-950/80 text-sm text-white"
+        aria-label={`Remove ${entry.file.name}`}
+      >
+        ✕
+      </button>
+
+      {hasPreviewError ? (
+        <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-stone-600">
+          {entry.file.name}
+        </div>
+      ) : (
+        <img
+          src={entry.url}
+          alt={entry.file.name}
+          className="h-full w-full object-cover"
+          onError={() => setHasPreviewError(true)}
+        />
+      )}
+    </div>
   );
 }
