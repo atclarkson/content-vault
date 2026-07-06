@@ -106,6 +106,10 @@ export default function PhotoGrid({
   }
 
   function handleTilePointerDown(event, photoId, isSelected) {
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+
     if (event.button !== 0) {
       return;
     }
@@ -120,6 +124,10 @@ export default function PhotoGrid({
   }
 
   function handleTilePointerMove(event, photoId) {
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+
     const dragState = dragSelectionRef.current;
 
     if (dragState.startPhotoId !== photoId || dragState.active) {
@@ -138,7 +146,11 @@ export default function PhotoGrid({
     applyDraggedSelection(photoId);
   }
 
-  function handleTilePointerEnter(photoId) {
+  function handleTilePointerEnter(event, photoId) {
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+
     if (!dragSelectionRef.current.active) {
       return;
     }
@@ -206,7 +218,7 @@ export default function PhotoGrid({
                 key={photo.id}
                 onPointerDown={(event) => handleTilePointerDown(event, photo.id, isSelected)}
                 onPointerMove={(event) => handleTilePointerMove(event, photo.id)}
-                onPointerEnter={() => handleTilePointerEnter(photo.id)}
+                onPointerEnter={(event) => handleTilePointerEnter(event, photo.id)}
                 className={`group relative overflow-hidden rounded-[1.75rem] border bg-stone-100 transition ${
                   isSelected
                     ? "border-amber-400 ring-2 ring-amber-300/80"
@@ -272,7 +284,7 @@ export default function PhotoGrid({
                       />
                     ) : null}
 
-                    <div className="absolute inset-x-0 bottom-0 z-10 translate-y-full px-4 py-3 transition group-hover:translate-y-0">
+                    <div className="absolute inset-x-0 bottom-0 z-10 min-w-0 translate-y-full px-4 py-3 transition group-hover:translate-y-0">
                       <p className="truncate text-sm font-medium text-white">{photo.original_filename}</p>
                     </div>
                   </div>
