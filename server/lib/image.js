@@ -3,8 +3,11 @@ const { execFile } = require("child_process");
 const os = require("os");
 const fs = require("fs");
 const crypto = require("crypto");
+const { promisify } = require("util");
 const sharp = require("sharp");
 const { applyEditRecipeToSharp } = require("./photoCorrection");
+
+const execFileAsync = promisify(execFile);
 
 const RAW_EXTENSIONS = new Set([
   ".cr2",
@@ -91,6 +94,36 @@ async function convertHeicWithSips(buffer) {
   }
 }
 
+async function convertHeicWithHeifConvert(buffer) {
+  const tmpDir = os.tmpdir();
+  const tmpId = crypto.randomBytes(8).toString("hex");
+  const inputPath = path.join(tmpDir, `cv-${tmpId}.heic`);
+  const outputPath = path.join(tmpDir, `cv-${tmpId}.jpg`);
+
+  try {
+    fs.writeFileSync(inputPath, buffer);
+
+    try {
+      await execFileAsync("heif-convert", ["-q", "90", inputPath, outputPath]);
+    } catch (error) {
+      const stderr = typeof error.stderr === "string" ? error.stderr.trim() : "";
+      throw new Error(
+        `HEIC conversion failed: ${stderr || error.message}`
+      );
+    }
+
+    return fs.readFileSync(outputPath);
+  } finally {
+    try {
+      fs.unlinkSync(inputPath);
+    } catch {}
+
+    try {
+      fs.unlinkSync(outputPath);
+    } catch {}
+  }
+}
+
 async function createPreviewDerivative(buffer, width, editRecipe = null) {
   return createDerivative(buffer, width, editRecipe);
 }
@@ -104,6 +137,8 @@ async function processImage(buffer, originalFilename, options = {}) {
 
   if (isMacOs && (extension === ".heic" || extension === ".heif")) {
     workingBuffer = await convertHeicWithSips(buffer);
+  } else if (extension === ".heic" || extension === ".heif") {
+    workingBuffer = await convertHeicWithHeifConvert(buffer);
   }
 
   const image = sharp(workingBuffer, { sequentialRead: true });
