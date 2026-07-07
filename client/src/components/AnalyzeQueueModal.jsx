@@ -903,7 +903,7 @@ export default function AnalyzeQueueModal({
       >
         {currentPhoto ? (
           <>
-            <div className="sticky top-0 z-10 border-b border-stone-200 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur">
+            <div className="sticky top-0 z-10 border-b border-stone-200 bg-white">
               <div className="px-4 py-3 lg:px-6">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -1319,7 +1319,7 @@ export default function AnalyzeQueueModal({
               </div>
             </div>
 
-            <div className="sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur lg:px-6 lg:pb-4">
+            <div className="sticky bottom-0 border-t border-stone-200 bg-white px-4 py-4 lg:px-6">
               <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-3">
                   <button
