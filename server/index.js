@@ -11,6 +11,7 @@ const clientDistPath = path.join(__dirname, "..", "client", "dist");
 initializeDatabase();
 
 app.use(express.json());
+app.use("/mcp", require("./routes/mcp"));
 app.use("/api", requireApiAuth);
 
 // API routes
