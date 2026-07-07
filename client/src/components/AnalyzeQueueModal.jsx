@@ -612,27 +612,18 @@ export default function AnalyzeQueueModal({
   }, [isOpen, queue]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || !currentPhoto) {
       return;
     }
 
-    const previewCandidates = [currentPhoto, ...prefetchedPhotos].filter(Boolean);
+    const recipe = analysisByPhotoId[currentPhoto.id]?.suggestions?.editRecipe;
 
-    for (const [index, photo] of previewCandidates.entries()) {
-      const analysis = analysisByPhotoId[photo.id];
-      const recipe = analysis?.suggestions?.editRecipe;
-
-      if (!recipe) {
-        continue;
-      }
-
-      void ensureCorrectionPreview(
-        photo,
-        recipe,
-        index === 0 ? "current-preview" : `prefetch-preview-${index}`,
-      );
+    if (!recipe) {
+      return;
     }
-  }, [analysisByPhotoId, currentPhoto, isOpen, prefetchedPhotos]);
+
+    void ensureCorrectionPreview(currentPhoto, recipe, "current-preview");
+  }, [analysisByPhotoId, currentPhoto, isOpen]);
 
   async function analyzePhoto(
     photo,
@@ -739,10 +730,6 @@ export default function AnalyzeQueueModal({
         reason,
         suggestedTags: nextSuggestions.tags.length,
       });
-
-      if (nextSuggestions.editRecipe) {
-        void ensureCorrectionPreview(photo, nextSuggestions.editRecipe, `${reason}-preview`);
-      }
 
       return nextSuggestions;
     } catch (analyzeError) {
@@ -1303,24 +1290,6 @@ export default function AnalyzeQueueModal({
                 </section>
 
                 <section className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleReanalyze}
-                      disabled={isApplying || isReanalyzing}
-                      className={isApplying || isReanalyzing ? "btn-secondary" : "ai-button"}
-                    >
-                      {isReanalyzing ? (
-                        "Reanalyzing..."
-                      ) : (
-                        <>
-                          <i className="ti ti-sparkles text-base" aria-hidden="true" />
-                          <span>Reanalyze</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
                   {!currentAnalysisIsFresh &&
                   currentAnalysis?.suggestions ? (
                     <p className="text-sm text-amber-700">
@@ -1598,6 +1567,21 @@ export default function AnalyzeQueueModal({
                     className="btn-secondary"
                   >
                     Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReanalyze}
+                    disabled={isApplying || isReanalyzing}
+                    className={isApplying || isReanalyzing ? "btn-secondary" : "ai-button"}
+                  >
+                    {isReanalyzing ? (
+                      "Reanalyzing..."
+                    ) : (
+                      <>
+                        <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                        <span>Reanalyze</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
