@@ -4,6 +4,9 @@ const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/ser
 const { z } = require("zod");
 const { getDb } = require("../lib/db");
 const { queryPhotos } = require("../lib/photoQuery");
+const { queryVideos } = require("../lib/videoQuery");
+const { queryJournals } = require("../lib/journalQuery");
+const { queryDestinations } = require("../lib/destinationQuery");
 
 const router = express.Router();
 
@@ -59,6 +62,117 @@ function getServer() {
     try {
       const db = getDb();
       const result = queryPhotos(db, args);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: error.message })
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+
+  server.registerTool("search_videos", {
+    description: "Search the YouTube video catalog by filmed date range, location, people, or tags. Returns videos with YouTube IDs and thumbnail URLs for embedding.",
+    inputSchema: {
+      text: z.string().optional(),
+      city: z.string().optional(),
+      country: z.string().optional(),
+      date_from: z.iso.date().optional(),
+      date_to: z.iso.date().optional(),
+      tags_any: z.array(z.string()).optional(),
+      people_any: z.array(z.string()).optional(),
+      has_location: z.boolean().optional(),
+      limit: z.number().default(20),
+      offset: z.number().default(0),
+      sort: z.enum(["newest", "oldest"]).default("newest"),
+      view: z.enum(["summary", "full"]).default("summary")
+    }
+  }, async (args) => {
+    try {
+      const db = getDb();
+      const result = queryVideos(db, args);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: error.message })
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+
+  server.registerTool("get_journal_entries", {
+    description: "Search imported Day One journal entries by date range, location, or text. Returns entry text and place metadata for narrative context.",
+    inputSchema: {
+      text: z.string().optional(),
+      city: z.string().optional(),
+      country: z.string().optional(),
+      date_from: z.iso.date().optional(),
+      date_to: z.iso.date().optional(),
+      has_location: z.boolean().optional(),
+      limit: z.number().default(10),
+      offset: z.number().default(0),
+      sort: z.enum(["newest", "oldest"]).default("newest"),
+      view: z.enum(["summary", "full"]).default("summary")
+    }
+  }, async (args) => {
+    try {
+      const db = getDb();
+      const result = queryJournals(db, args);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: error.message })
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+
+  server.registerTool("get_destinations", {
+    description: "List all travel destinations (city/country) with counts of photos, videos, and journal entries and the date range of content at each. Use to see where and when the family has traveled.",
+    inputSchema: {}
+  }, async () => {
+    try {
+      const db = getDb();
+      const result = queryDestinations(db);
 
       return {
         content: [
