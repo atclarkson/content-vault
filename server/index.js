@@ -11,7 +11,14 @@ const clientDistPath = path.join(__dirname, "..", "client", "dist");
 initializeDatabase();
 
 app.use(express.json());
-app.use("/mcp", require("./routes/mcp"));
+const mcpPathToken = String(process.env.MCP_PATH_TOKEN || "").trim();
+
+if (mcpPathToken) {
+  app.use(`/mcp/${mcpPathToken}`, require("./routes/mcp"));
+} else {
+  console.warn("MCP endpoint disabled: MCP_PATH_TOKEN is not set");
+}
+
 app.use("/api", requireApiAuth);
 
 // API routes
