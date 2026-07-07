@@ -59,6 +59,7 @@ Browser login uses Google OAuth directly in the Express app and keeps API/MCP au
 - Redirect URI: `${AUTH_URL}/api/auth/callback/google`
 - Local redirect URI: `http://localhost:3000/api/auth/callback/google`
 - Hosted redirect URI example: `https://al-vault.com/api/auth/callback/google`
+- Public login start route: `/api/auth/google`
 
 Set these env vars:
 

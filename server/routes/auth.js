@@ -51,7 +51,7 @@ router.post("/logout", (req, res) => {
   res.json({ data: { logged_out: true } });
 });
 
-router.get("/login", (req, res) => {
+function redirectToGoogle(req, res) {
   if (hasBrowserSession(req)) {
     return res.redirect("/");
   }
@@ -73,7 +73,10 @@ router.get("/login", (req, res) => {
   });
 
   return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
-});
+}
+
+router.get("/google", redirectToGoogle);
+router.get("/login", redirectToGoogle);
 
 router.get("/callback/google", async (req, res) => {
   const config = requireAuthConfig(res);
@@ -87,12 +90,12 @@ router.get("/callback/google", async (req, res) => {
 
   if (!storedState || returnedState !== storedState) {
     clearBrowserSession(res);
-    return res.redirect("/login?error=invalid_state");
+    return res.redirect("/login?error=oauth");
   }
 
   if (!req.query.code) {
     clearBrowserSession(res);
-    return res.redirect("/login?error=invalid_request");
+    return res.redirect("/login?error=oauth");
   }
 
   try {
@@ -112,7 +115,7 @@ router.get("/callback/google", async (req, res) => {
     const tokenData = await tokenResponse.json();
 
     if (!tokenResponse.ok || !tokenData.access_token) {
-      return res.redirect("/login?error=signin_failed");
+      return res.redirect("/login?error=oauth");
     }
 
     const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
@@ -126,7 +129,7 @@ router.get("/callback/google", async (req, res) => {
 
     if (!profileResponse.ok || !email || !isVerified) {
       clearBrowserSession(res);
-      return res.redirect("/login?error=signin_failed");
+      return res.redirect("/login?error=oauth");
     }
 
     if (email !== getAllowedEmail()) {
@@ -139,8 +142,9 @@ router.get("/callback/google", async (req, res) => {
   } catch (error) {
     console.error("Google sign-in failed", error);
     clearBrowserSession(res);
-    return res.redirect("/login?error=signin_failed");
+    return res.redirect("/login?error=oauth");
   }
 });
 
 module.exports = router;
+module.exports.redirectToGoogle = redirectToGoogle;

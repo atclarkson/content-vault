@@ -42,7 +42,7 @@ function LoginPage() {
               {errorMessage}
             </div>
           ) : null}
-          <a href="/api/auth/login" className="btn-primary mt-8 w-full rounded-2xl py-3">
+          <a href="/api/auth/google" className="btn-primary mt-8 w-full rounded-2xl py-3">
             Sign in with Google
           </a>
         </div>
