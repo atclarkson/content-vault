@@ -1098,7 +1098,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
       <div
         className={
           hasActiveEditorContent
-            ? "fixed inset-0 z-[60] flex min-h-0 flex-col bg-white xl:static xl:z-auto xl:w-[560px] xl:shrink-0 xl:flex"
+            ? "fixed inset-0 z-[60] flex min-h-0 flex-col bg-white pt-[env(safe-area-inset-top)] xl:static xl:z-auto xl:w-[560px] xl:shrink-0 xl:flex xl:pt-0"
             : "hidden min-h-0 xl:flex xl:w-[560px] xl:shrink-0"
         }
       >

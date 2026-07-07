@@ -176,6 +176,7 @@ export default function AnalyzeQueueModal({
   const [history, setHistory] = useState([]);
   const [initialQueueLength, setInitialQueueLength] = useState(0);
   const [correctionPreviewByKey, setCorrectionPreviewByKey] = useState({});
+  const [isPreviewLightboxOpen, setIsPreviewLightboxOpen] = useState(false);
   const analysisByPhotoIdRef = useRef({});
   const wasOpenRef = useRef(false);
   const correctionPreviewByKeyRef = useRef({});
@@ -886,6 +887,10 @@ export default function AnalyzeQueueModal({
     initialQueueLength > 0
       ? Math.max(0, initialQueueLength - queue.length) / initialQueueLength
       : 0;
+  const displayedPreviewUrl =
+    fieldSelection.photoCorrection && correctionPreviewUrl
+      ? correctionPreviewUrl
+      : currentPhoto?.large_url || "";
 
   return (
     <div
@@ -898,7 +903,7 @@ export default function AnalyzeQueueModal({
       >
         {currentPhoto ? (
           <>
-            <div className="sticky top-0 z-10 border-b border-stone-200 bg-white/95 backdrop-blur">
+            <div className="sticky top-0 z-10 border-b border-stone-200 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur">
               <div className="px-4 py-3 lg:px-6">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -948,26 +953,33 @@ export default function AnalyzeQueueModal({
 
               <div className="border-t border-stone-200 px-4 py-3 lg:px-6">
                 <div className="mx-auto w-full max-w-3xl overflow-hidden border border-stone-300 bg-stone-100">
-                  <div className="relative flex max-h-[40vh] min-h-[180px] items-center justify-center p-2 sm:min-h-[220px]">
-                    {currentPhoto.large_url ? (
-                      <img
-                        src={
-                          fieldSelection.photoCorrection && correctionPreviewUrl
-                            ? correctionPreviewUrl
-                            : currentPhoto.large_url
-                        }
-                        alt={currentPhoto.alt_text || currentPhoto.original_filename}
-                        className="h-full w-full object-contain"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
-                        No image available
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (displayedPreviewUrl) {
+                        setIsPreviewLightboxOpen(true);
+                      }
+                    }}
+                    className="block w-full"
+                    aria-label="Open preview larger"
+                  >
+                    <div className="relative flex max-h-[28vh] min-h-[160px] items-center justify-center p-2 sm:min-h-[180px] lg:max-h-[40vh] lg:min-h-[220px]">
+                      {displayedPreviewUrl ? (
+                        <img
+                          src={displayedPreviewUrl}
+                          alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
+                          No image available
+                        </div>
+                      )}
+                      <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-stone-950/75 px-2.5 py-1 text-xs font-medium text-white">
+                        {fieldSelection.photoCorrection ? "Corrected" : "Original"}
                       </div>
-                    )}
-                    <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-stone-950/75 px-2.5 py-1 text-xs font-medium text-white">
-                      {fieldSelection.photoCorrection ? "Corrected" : "Original"}
                     </div>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1307,7 +1319,7 @@ export default function AnalyzeQueueModal({
               </div>
             </div>
 
-            <div className="sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 py-4 backdrop-blur lg:px-6">
+            <div className="sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur lg:px-6 lg:pb-4">
               <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-3">
                   <button
@@ -1357,6 +1369,32 @@ export default function AnalyzeQueueModal({
           </div>
         )}
       </div>
+
+      {isPreviewLightboxOpen && displayedPreviewUrl ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-950/85 p-4"
+          onClick={() => setIsPreviewLightboxOpen(false)}
+        >
+          <div
+            className="relative max-h-full max-w-[min(96vw,1400px)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setIsPreviewLightboxOpen(false)}
+              className="absolute right-3 top-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-stone-900 shadow"
+              aria-label="Close preview"
+            >
+              <i className="ti ti-x text-base" aria-hidden="true" />
+            </button>
+            <img
+              src={displayedPreviewUrl}
+              alt={currentPhoto?.alt_text || currentPhoto?.original_filename || "Preview"}
+              className="max-h-[90vh] max-w-full border border-stone-300 bg-white object-contain shadow-2xl"
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
