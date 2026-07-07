@@ -191,12 +191,14 @@ function acceptPhotoFaceMatches(db, photoId, faceMatchIds) {
   `);
 
   for (const row of rows) {
-    if (!row.top_person_id) {
-      throw new Error(`Face match ${row.id} does not have a suggested person`);
+    const acceptedPerson = resolveAcceptedPersonFromFaceMatch(row);
+
+    if (!acceptedPerson?.person_id) {
+      throw new Error(`Face match ${row.id} does not have a selectable person`);
     }
 
     upsertFaceReference(db, {
-      personId: row.top_person_id,
+      personId: acceptedPerson.person_id,
       photoId,
       faceIndex: row.face_index,
       faceBox: safeParseJson(row.face_box_json, {}),
@@ -380,27 +382,55 @@ function aggregatePrematchPeople(faces) {
   const matchesByPersonId = new Map();
 
   for (const face of faces) {
-    if (!face.top_person_id || !face.top_name) {
+    const suggestedPerson = getSuggestedPersonForFace(face);
+
+    if (!suggestedPerson?.person_id || !suggestedPerson?.name) {
       continue;
     }
 
-    if (!matchesByPersonId.has(face.top_person_id)) {
-      matchesByPersonId.set(face.top_person_id, {
-        person_id: face.top_person_id,
-        name: face.top_name,
-        score: face.top_score,
+    if (!matchesByPersonId.has(suggestedPerson.person_id)) {
+      matchesByPersonId.set(suggestedPerson.person_id, {
+        person_id: suggestedPerson.person_id,
+        name: suggestedPerson.name,
+        score: suggestedPerson.score,
         face_match_ids: [],
+        tentative: suggestedPerson.tentative,
       });
     }
 
-    const entry = matchesByPersonId.get(face.top_person_id);
-    entry.score = Math.max(entry.score, face.top_score);
+    const entry = matchesByPersonId.get(suggestedPerson.person_id);
+    entry.score = Math.max(entry.score, suggestedPerson.score);
+    entry.tentative = entry.tentative && suggestedPerson.tentative;
     entry.face_match_ids.push(face.id);
   }
 
   return Array.from(matchesByPersonId.values()).sort(
     (left, right) => right.score - left.score,
   );
+}
+
+function getSuggestedPersonForFace(face) {
+  if (face?.top_person_id && face?.top_name) {
+    return {
+      person_id: face.top_person_id,
+      name: face.top_name,
+      score: face.top_score,
+      tentative: false,
+    };
+  }
+
+  const topCandidate = Array.isArray(face?.candidates) ? face.candidates[0] : null;
+
+  if (!topCandidate?.person_id || !topCandidate?.name) {
+    return null;
+  }
+
+  return {
+    person_id: topCandidate.person_id,
+    name: topCandidate.name,
+    score: topCandidate.score,
+    tentative: true,
+  };
 }
 
 function deriveExpressionTags(expressions) {
@@ -467,6 +497,27 @@ function loadFaceMatchesByIds(db, photoId, faceMatchIds) {
   }
 
   return rows;
+}
+
+function resolveAcceptedPersonFromFaceMatch(row) {
+  if (row?.top_person_id) {
+    return {
+      person_id: row.top_person_id,
+      tentative: false,
+    };
+  }
+
+  const candidates = safeParseJson(row?.candidate_json, []);
+  const topCandidate = Array.isArray(candidates) ? candidates[0] : null;
+
+  if (!topCandidate?.person_id) {
+    return null;
+  }
+
+  return {
+    person_id: topCandidate.person_id,
+    tentative: true,
+  };
 }
 
 function upsertFaceReference(db, input) {

@@ -95,6 +95,58 @@ function formatConfidence(score) {
   return `${Math.round(numericScore * 100)}%`;
 }
 
+function getFaceOverlayLabel(face) {
+  if (face?.top_name) {
+    return `${face.top_name} ${formatConfidence(face.top_score)}`;
+  }
+
+  const topCandidate = Array.isArray(face?.candidates) ? face.candidates[0] : null;
+
+  if (topCandidate?.name) {
+    return `${topCandidate.name}? ${formatConfidence(topCandidate.score)}`;
+  }
+
+  return `Face ${Number(face?.face_index) + 1 || ""}`.trim();
+}
+
+function getFacePrematchLabel(match) {
+  if (!match) {
+    return "";
+  }
+
+  const confidence = formatConfidence(match.score);
+
+  if (match.tentative) {
+    return `${match.name}? (${confidence})`;
+  }
+
+  return `${match.name} (${confidence})`;
+}
+
+function getImageOverlayMetrics(imageElement) {
+  if (!imageElement) {
+    return null;
+  }
+
+  const renderedWidth = imageElement.clientWidth;
+  const renderedHeight = imageElement.clientHeight;
+  const naturalWidth = imageElement.naturalWidth;
+  const naturalHeight = imageElement.naturalHeight;
+
+  if (!renderedWidth || !renderedHeight || !naturalWidth || !naturalHeight) {
+    return null;
+  }
+
+  return {
+    left: imageElement.offsetLeft,
+    top: imageElement.offsetTop,
+    renderedWidth,
+    renderedHeight,
+    naturalWidth,
+    naturalHeight,
+  };
+}
+
 function formatLogTime() {
   return new Date().toLocaleTimeString([], {
     hour: "2-digit",
@@ -196,10 +248,14 @@ export default function AnalyzeQueueModal({
   const [isPreviewLightboxOpen, setIsPreviewLightboxOpen] = useState(false);
   const [acceptedFaceMatchIds, setAcceptedFaceMatchIds] = useState([]);
   const [rejectedFaceMatchIds, setRejectedFaceMatchIds] = useState([]);
+  const [previewImageMetrics, setPreviewImageMetrics] = useState(null);
+  const [lightboxImageMetrics, setLightboxImageMetrics] = useState(null);
   const analysisByPhotoIdRef = useRef({});
   const wasOpenRef = useRef(false);
   const correctionPreviewByKeyRef = useRef({});
   const bodyScrollRef = useRef(null);
+  const previewImageRef = useRef(null);
+  const lightboxImageRef = useRef(null);
 
   useEffect(() => {
     analysisByPhotoIdRef.current = analysisByPhotoId;
@@ -398,6 +454,16 @@ export default function AnalyzeQueueModal({
       bodyScrollRef.current.scrollTop = 0;
     }
   }, [currentPhoto?.id]);
+
+  useEffect(() => {
+    function handleResize() {
+      setPreviewImageMetrics(getImageOverlayMetrics(previewImageRef.current));
+      setLightboxImageMetrics(getImageOverlayMetrics(lightboxImageRef.current));
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   async function ensureCorrectionPreview(photo, editRecipe, reason) {
     const cacheKey = buildRecipeCacheKey(photo?.id, editRecipe);
@@ -1032,11 +1098,23 @@ export default function AnalyzeQueueModal({
                   >
                     <div className="relative flex max-h-[28vh] min-h-[160px] items-center justify-center p-2 sm:min-h-[180px] lg:max-h-[40vh] lg:min-h-[220px]">
                       {displayedPreviewUrl ? (
-                        <img
-                          src={displayedPreviewUrl}
-                          alt={currentPhoto.alt_text || currentPhoto.original_filename}
-                          className="h-full w-full object-contain"
-                        />
+                        <>
+                          <img
+                            ref={previewImageRef}
+                            src={displayedPreviewUrl}
+                            alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                            className="h-full w-full object-contain"
+                            onLoad={(event) => {
+                              setPreviewImageMetrics(
+                                getImageOverlayMetrics(event.currentTarget),
+                              );
+                            }}
+                          />
+                          <FacePrematchOverlay
+                            faces={currentSuggestionState?.facePrematchFaces || []}
+                            metrics={previewImageMetrics}
+                          />
+                        </>
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
                           No image available
@@ -1163,9 +1241,12 @@ export default function AnalyzeQueueModal({
                               key={`${match.person_id}-${match.face_match_ids?.join("-")}`}
                               className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700"
                             >
-                              <span>
-                                {match.name} ({formatConfidence(match.score)})
-                              </span>
+                              <span>{getFacePrematchLabel(match)}</span>
+                              {match.tentative ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">
+                                  tentative
+                                </span>
+                              ) : null}
                               {isAccepted ? (
                                 <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
                                   selected
@@ -1553,9 +1634,19 @@ export default function AnalyzeQueueModal({
               <i className="ti ti-x text-base" aria-hidden="true" />
             </button>
             <img
+              ref={lightboxImageRef}
               src={displayedPreviewUrl}
               alt={currentPhoto?.alt_text || currentPhoto?.original_filename || "Preview"}
               className="max-h-[90vh] max-w-full border border-stone-300 bg-white object-contain shadow-2xl"
+              onLoad={(event) => {
+                setLightboxImageMetrics(
+                  getImageOverlayMetrics(event.currentTarget),
+                );
+              }}
+            />
+            <FacePrematchOverlay
+              faces={currentSuggestionState?.facePrematchFaces || []}
+              metrics={lightboxImageMetrics}
             />
           </div>
         </div>
@@ -1595,5 +1686,44 @@ function SuggestionField({
         {value}
       </p>
     </section>
+  );
+}
+
+function FacePrematchOverlay({ faces, metrics }) {
+  if (!metrics || !Array.isArray(faces) || faces.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      {faces.map((face) => {
+        const box = face?.box || {};
+        const left = metrics.left + (Number(box.x) / metrics.naturalWidth) * metrics.renderedWidth;
+        const top = metrics.top + (Number(box.y) / metrics.naturalHeight) * metrics.renderedHeight;
+        const width = (Number(box.width) / metrics.naturalWidth) * metrics.renderedWidth;
+        const height = (Number(box.height) / metrics.naturalHeight) * metrics.renderedHeight;
+
+        if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height)) {
+          return null;
+        }
+
+        return (
+          <div
+            key={face.id || face.face_index}
+            className="absolute border-2 border-emerald-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            style={{
+              left,
+              top,
+              width,
+              height,
+            }}
+          >
+            <div className="absolute left-0 top-0 -translate-y-full rounded-t-md bg-emerald-500/95 px-2 py-1 text-[11px] font-medium leading-none text-white shadow">
+              {getFaceOverlayLabel(face)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
