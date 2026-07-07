@@ -3,6 +3,10 @@ const { getDb, initializeDatabase } = require("../lib/db");
 const processImage = require("../lib/image");
 const { createPreviewDerivative } = require("../lib/image");
 const { uploadFile } = require("../lib/r2");
+const {
+  acceptPhotoFaceMatches,
+  rejectPhotoFaceMatches,
+} = require("../lib/faceAnalysis");
 const { normalizeEditRecipe } = require("../lib/photoCorrection");
 const { queryPhotos, buildPhotoOrderByClause, buildMissingCondition } = require("../lib/photoQuery");
 const { isQueryBadRequestError } = require("../lib/queryUtils");
@@ -234,6 +238,12 @@ router.put("/:id", async (req, res) => {
     const tags = Object.prototype.hasOwnProperty.call(payload, "tags")
       ? normalizeTagNames(payload.tags)
       : null;
+    const acceptedFaceMatchIds = Object.prototype.hasOwnProperty.call(payload, "accept_face_match_ids")
+      ? normalizeIdArray(payload.accept_face_match_ids)
+      : [];
+    const rejectedFaceMatchIds = Object.prototype.hasOwnProperty.call(payload, "reject_face_match_ids")
+      ? normalizeIdArray(payload.reject_face_match_ids)
+      : [];
     const editRecipe = Object.prototype.hasOwnProperty.call(payload, "edit_recipe")
       ? normalizeEditRecipe(payload.edit_recipe)
       : null;
@@ -289,6 +299,8 @@ router.put("/:id", async (req, res) => {
       params.push(nextCorrectionStatus);
     }
 
+    validateFaceMatchSelection(acceptedFaceMatchIds, rejectedFaceMatchIds);
+
     const applyUpdate = db.transaction(() => {
       if (updates.length > 0) {
         params.push(photoId);
@@ -308,6 +320,14 @@ router.put("/:id", async (req, res) => {
       if (tags !== null) {
         const tagIds = ensureTagsExist(db, tags);
         replacePhotoTags(db, photoId, tagIds);
+      }
+
+      if (acceptedFaceMatchIds.length > 0) {
+        acceptPhotoFaceMatches(db, photoId, acceptedFaceMatchIds);
+      }
+
+      if (rejectedFaceMatchIds.length > 0) {
+        rejectPhotoFaceMatches(db, photoId, rejectedFaceMatchIds);
       }
     });
 
@@ -606,6 +626,20 @@ function addScalarUpdate(updates, params, payload, field) {
   if (Object.prototype.hasOwnProperty.call(payload, field)) {
     updates.push(`${field} = ?`);
     params.push(payload[field] || null);
+  }
+}
+
+function validateFaceMatchSelection(acceptedFaceMatchIds, rejectedFaceMatchIds) {
+  if (acceptedFaceMatchIds.length === 0 || rejectedFaceMatchIds.length === 0) {
+    return;
+  }
+
+  const rejectedIds = new Set(rejectedFaceMatchIds);
+
+  for (const faceMatchId of acceptedFaceMatchIds) {
+    if (rejectedIds.has(faceMatchId)) {
+      throw new Error("A face match cannot be both accepted and rejected");
+    }
   }
 }
 

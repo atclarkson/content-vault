@@ -32,6 +32,7 @@ function initializeDatabase() {
   ensureTagGroupsTable(database);
   ensureDestinationsTable(database);
   ensureVideoTables(database);
+  ensureFaceTables(database);
   seedPeople(database);
 
   return database;
@@ -324,6 +325,49 @@ function ensureVideoTables(database) {
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_date_filmed ON videos (date_filmed)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_videos_deleted_at ON videos (deleted_at)");
+}
+
+function ensureFaceTables(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS person_face_refs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      face_index INTEGER NOT NULL,
+      face_box_json TEXT NOT NULL,
+      embedding_json TEXT NOT NULL,
+      quality_score REAL,
+      source TEXT NOT NULL CHECK (source IN ('manual_confirmed', 'seed_backfill')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (person_id) REFERENCES people (id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos (id) ON DELETE CASCADE
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS photo_face_matches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER NOT NULL,
+      image_version INTEGER NOT NULL DEFAULT 1,
+      face_index INTEGER NOT NULL,
+      face_box_json TEXT NOT NULL,
+      embedding_json TEXT NOT NULL,
+      top_person_id INTEGER,
+      top_score REAL,
+      candidate_json TEXT,
+      expression_json TEXT,
+      status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested', 'accepted', 'rejected')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (photo_id) REFERENCES photos (id) ON DELETE CASCADE,
+      FOREIGN KEY (top_person_id) REFERENCES people (id) ON DELETE SET NULL
+    )
+  `);
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_person_face_refs_person_id ON person_face_refs (person_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_person_face_refs_photo_id ON person_face_refs (photo_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photo_face_matches_photo_id_image_version ON photo_face_matches (photo_id, image_version)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photo_face_matches_status ON photo_face_matches (status)");
 }
 
 function ensureTableColumns(database, tableName, missingColumns) {

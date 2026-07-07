@@ -75,6 +75,38 @@ CREATE TABLE IF NOT EXISTS photo_people (
   FOREIGN KEY (person_id) REFERENCES people (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS person_face_refs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  person_id INTEGER NOT NULL,
+  photo_id INTEGER NOT NULL,
+  face_index INTEGER NOT NULL,
+  face_box_json TEXT NOT NULL,
+  embedding_json TEXT NOT NULL,
+  quality_score REAL,
+  source TEXT NOT NULL CHECK (source IN ('manual_confirmed', 'seed_backfill')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (person_id) REFERENCES people (id) ON DELETE CASCADE,
+  FOREIGN KEY (photo_id) REFERENCES photos (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS photo_face_matches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  photo_id INTEGER NOT NULL,
+  image_version INTEGER NOT NULL DEFAULT 1,
+  face_index INTEGER NOT NULL,
+  face_box_json TEXT NOT NULL,
+  embedding_json TEXT NOT NULL,
+  top_person_id INTEGER,
+  top_score REAL,
+  candidate_json TEXT,
+  expression_json TEXT,
+  status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested', 'accepted', 'rejected')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (photo_id) REFERENCES photos (id) ON DELETE CASCADE,
+  FOREIGN KEY (top_person_id) REFERENCES people (id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -189,6 +221,10 @@ CREATE INDEX IF NOT EXISTS idx_photos_processing_status ON photos (processing_st
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos (captured_at);
 CREATE INDEX IF NOT EXISTS idx_photos_correction_applied_at ON photos (photo_correction_applied_at);
+CREATE INDEX IF NOT EXISTS idx_person_face_refs_person_id ON person_face_refs (person_id);
+CREATE INDEX IF NOT EXISTS idx_person_face_refs_photo_id ON person_face_refs (photo_id);
+CREATE INDEX IF NOT EXISTS idx_photo_face_matches_photo_id_image_version ON photo_face_matches (photo_id, image_version);
+CREATE INDEX IF NOT EXISTS idx_photo_face_matches_status ON photo_face_matches (status);
 CREATE INDEX IF NOT EXISTS idx_tag_groups_sort_order ON tag_groups (sort_order);
 CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start);
 CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published);

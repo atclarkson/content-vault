@@ -32,22 +32,29 @@ function mergeTags(existingTags, suggestedTags) {
 }
 
 function buildSuggestionState(suggestions, photo, knownTags, tagGroups) {
+  const expressionTags = (suggestions.expressionTags || []).map((tag) =>
+    typeof tag === "string" ? { name: tag } : tag,
+  );
+  const combinedTagSuggestions = [...(suggestions.tags || []), ...expressionTags];
   const tagByKey = new Map(
     (knownTags || []).map((tag) => [normalizeTagKey(tag.name), tag]),
   );
   const groupByName = new Map(
     (tagGroups || []).map((group) => [normalizeTagKey(group.name), group]),
   );
-  const mergedTags = mergeTags(photo.tags || [], suggestions.tags || []);
+  const mergedTags = mergeTags(photo.tags || [], combinedTagSuggestions);
 
   return {
     people: suggestions.people || [],
+    facePrematchPeople: suggestions.facePrematchPeople || [],
+    facePrematchFaces: suggestions.facePrematchFaces || [],
+    expressionTags,
     editRecipe: suggestions.editRecipe || null,
     title: suggestions.title || "",
     aiCaption: suggestions.aiCaption || "",
     altText: suggestions.altText || "",
     tags: mergedTags,
-    tagRecords: (suggestions.tags || []).map((tag) => {
+    tagRecords: combinedTagSuggestions.map((tag) => {
       const tagName = tag.name || tag;
       const existingTag = tagByKey.get(normalizeTagKey(tagName));
       const matchingGroup = groupByName.get(
@@ -76,6 +83,16 @@ function buildDefaultFieldSelection(suggestionState, notesChanged) {
 
 function buildAnalyzeErrorMessage(error) {
   return error?.message || "Failed to analyze photo";
+}
+
+function formatConfidence(score) {
+  const numericScore = Number(score);
+
+  if (!Number.isFinite(numericScore) || numericScore <= 0) {
+    return "0%";
+  }
+
+  return `${Math.round(numericScore * 100)}%`;
 }
 
 function formatLogTime() {
@@ -177,6 +194,8 @@ export default function AnalyzeQueueModal({
   const [initialQueueLength, setInitialQueueLength] = useState(0);
   const [correctionPreviewByKey, setCorrectionPreviewByKey] = useState({});
   const [isPreviewLightboxOpen, setIsPreviewLightboxOpen] = useState(false);
+  const [acceptedFaceMatchIds, setAcceptedFaceMatchIds] = useState([]);
+  const [rejectedFaceMatchIds, setRejectedFaceMatchIds] = useState([]);
   const analysisByPhotoIdRef = useRef({});
   const wasOpenRef = useRef(false);
   const correctionPreviewByKeyRef = useRef({});
@@ -306,6 +325,8 @@ export default function AnalyzeQueueModal({
         tags: false,
       });
       setSelectedPeopleIds([]);
+      setAcceptedFaceMatchIds([]);
+      setRejectedFaceMatchIds([]);
       return;
     }
 
@@ -314,6 +335,8 @@ export default function AnalyzeQueueModal({
     setSelectedPeopleIds(
       (currentPhoto.people || []).map((person) => person.id),
     );
+    setAcceptedFaceMatchIds([]);
+    setRejectedFaceMatchIds([]);
     setFieldSelection((currentValue) => {
       if (currentAnalysis?.suggestions) {
         return buildDefaultFieldSelection(
@@ -606,6 +629,9 @@ export default function AnalyzeQueueModal({
       });
       const nextSuggestions = {
         people: response?.data?.suggested_people || [],
+        facePrematchPeople: response?.data?.face_prematch_people || [],
+        facePrematchFaces: response?.data?.face_prematch_faces || [],
+        expressionTags: response?.data?.suggested_expression_tags || [],
         editRecipe: response?.data?.edit_recipe || null,
         title: response?.data?.suggested_title || "",
         aiCaption: response?.data?.ai_caption || "",
@@ -712,6 +738,14 @@ export default function AnalyzeQueueModal({
 
       if (fieldSelection.people) {
         payload.people = selectedPeopleIds;
+      }
+
+      if (acceptedFaceMatchIds.length > 0) {
+        payload.accept_face_match_ids = acceptedFaceMatchIds;
+      }
+
+      if (rejectedFaceMatchIds.length > 0) {
+        payload.reject_face_match_ids = rejectedFaceMatchIds;
       }
 
       if (currentSuggestionState.editRecipe) {
@@ -860,6 +894,39 @@ export default function AnalyzeQueueModal({
       ...currentValue,
       people: true,
     }));
+  }
+
+  function acceptFacePrematchPerson(match) {
+    if (!match?.person_id) {
+      return;
+    }
+
+    setSelectedPeopleIds((currentValue) => [
+      ...new Set([...currentValue, match.person_id]),
+    ]);
+    setAcceptedFaceMatchIds((currentValue) => [
+      ...new Set([...currentValue, ...(match.face_match_ids || [])]),
+    ]);
+    setRejectedFaceMatchIds((currentValue) =>
+      currentValue.filter((id) => !(match.face_match_ids || []).includes(id)),
+    );
+    setFieldSelection((currentValue) => ({
+      ...currentValue,
+      people: true,
+    }));
+  }
+
+  function rejectFacePrematchPerson(match) {
+    if (!Array.isArray(match?.face_match_ids) || match.face_match_ids.length === 0) {
+      return;
+    }
+
+    setRejectedFaceMatchIds((currentValue) => [
+      ...new Set([...currentValue, ...match.face_match_ids]),
+    ]);
+    setAcceptedFaceMatchIds((currentValue) =>
+      currentValue.filter((id) => !match.face_match_ids.includes(id)),
+    );
   }
 
   if (!isOpen) {
@@ -1076,6 +1143,60 @@ export default function AnalyzeQueueModal({
                     </p>
                   )}
 
+                  {currentSuggestionState?.facePrematchPeople &&
+                  currentSuggestionState.facePrematchPeople.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-sm text-stone-600">
+                        Local face prematch:
+                      </p>
+                      <div className="space-y-2">
+                        {currentSuggestionState.facePrematchPeople.map((match) => {
+                          const isAccepted = (match.face_match_ids || []).every((id) =>
+                            acceptedFaceMatchIds.includes(id),
+                          );
+                          const isRejected = (match.face_match_ids || []).every((id) =>
+                            rejectedFaceMatchIds.includes(id),
+                          );
+
+                          return (
+                            <div
+                              key={`${match.person_id}-${match.face_match_ids?.join("-")}`}
+                              className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700"
+                            >
+                              <span>
+                                {match.name} ({formatConfidence(match.score)})
+                              </span>
+                              {isAccepted ? (
+                                <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
+                                  selected
+                                </span>
+                              ) : null}
+                              {isRejected ? (
+                                <span className="rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">
+                                  rejected
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => acceptFacePrematchPerson(match)}
+                                className="btn-secondary px-3 py-1.5 text-sm"
+                              >
+                                Use Local Match
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => rejectFacePrematchPerson(match)}
+                                className="btn-secondary px-3 py-1.5 text-sm"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mt-4">
                     <PeopleSelector
                       selectedIds={selectedPeopleIds}
@@ -1192,6 +1313,14 @@ export default function AnalyzeQueueModal({
                               </span>
                             ))}
                           </div>
+                          {currentSuggestionState.expressionTags.length > 0 ? (
+                            <p className="mt-3 text-sm text-stone-600">
+                              Includes local expression tags:{" "}
+                              {currentSuggestionState.expressionTags
+                                .map((tag) => tag.name || tag)
+                                .join(", ")}
+                            </p>
+                          ) : null}
                           <p className="mt-3 text-sm text-stone-600">
                             Resulting tags: {currentSuggestionState.tags.join(", ")}
                           </p>
@@ -1212,6 +1341,42 @@ export default function AnalyzeQueueModal({
                       </summary>
 
                       <div className="mt-4 space-y-4">
+                        <div>
+                          <p className="text-[11px] font-medium text-stone-500">
+                            Local face prematch
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {currentSuggestionState.facePrematchFaces.length > 0 ? (
+                              currentSuggestionState.facePrematchFaces.map((face) => (
+                                <div key={face.id} className="text-stone-800">
+                                  <p>
+                                    Face {face.face_index + 1}: {face.top_name || "No confident match"}{" "}
+                                    {face.top_name ? `(${formatConfidence(face.top_score)})` : ""}
+                                  </p>
+                                  <p className="mt-1 text-xs text-stone-500">
+                                    Expressions: {face.suggested_expression_tags?.length > 0
+                                      ? face.suggested_expression_tags
+                                        .map((tag) => tag.name)
+                                        .join(", ")
+                                      : "none"}
+                                  </p>
+                                  <p className="mt-1 text-xs text-stone-500">
+                                    Candidates: {face.candidates?.length > 0
+                                      ? face.candidates
+                                        .map((candidate) => `${candidate.name} ${formatConfidence(candidate.score)}`)
+                                        .join(", ")
+                                      : "none"}
+                                  </p>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-stone-800">
+                                No local face prematch data.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
                         <div>
                           <p className="text-[11px] font-medium text-stone-500">
                             Current title

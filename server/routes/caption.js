@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb, initializeDatabase } = require("../lib/db");
+const { analyzePhotoFaces } = require("../lib/faceAnalysis");
 const { normalizeEditRecipe } = require("../lib/photoCorrection");
 
 const router = express.Router();
@@ -143,11 +144,23 @@ router.post("/:id", async (req, res) => {
       };
     }
 
+    let facePrematch = {
+      people: [],
+      faces: [],
+      expressionTags: []
+    };
+
+    try {
+      facePrematch = await analyzePhotoFaces(db, enrichedPhoto);
+    } catch (error) {
+      console.warn(`Face prematch unavailable for photo ${photoId}: ${error.message}`);
+    }
+
     const tagTaxonomy = loadTagTaxonomy(db);
     const captionBio = loadCaptionBio(db);
     const captionMemory = loadRecentCaptionMemory(db, photoId);
     const imageBase64 = await fetchImageAsBase64(promptPhoto.large_url);
-    const prompt = buildCaptionPrompt(promptPhoto, captionMemory);
+    const prompt = buildCaptionPrompt(promptPhoto, captionMemory, facePrematch);
     const anthropicResponse = await requestCaptionFromAnthropic(
       apiKey,
       captionBio,
@@ -181,6 +194,9 @@ router.post("/:id", async (req, res) => {
         suggested_title: parsedResponse.suggestedTitle || null,
         suggested_people: parsedResponse.peopleSuggestions || [],
         suggested_tags: parsedResponse.tagSuggestions || [],
+        face_prematch_people: facePrematch.people || [],
+        face_prematch_faces: facePrematch.faces || [],
+        suggested_expression_tags: facePrematch.expressionTags || [],
         edit_recipe: normalizedEditRecipe,
         notes_for_ai_used: promptPhoto.notes_for_ai || "",
         people_used: (promptPhoto.people || []).map((person) => person.id),
@@ -409,7 +425,7 @@ function parseEditRecipe(value) {
   }
 }
 
-function buildCaptionPrompt(photo, captionMemory) {
+function buildCaptionPrompt(photo, captionMemory, facePrematch) {
   const people = (photo.people || []).map((person) => person.name);
   const tags = photo.tags || [];
   const locationParts = [
@@ -459,6 +475,8 @@ function buildCaptionPrompt(photo, captionMemory) {
     "- Only suggest a person if the image gives a reasonable visual basis for it",
     "- If you are unsure, leave them out",
     "- Never suggest anyone outside that list",
+    "- Local face prematch hints below are heuristic only. They can help with PEOPLE_SUGGESTIONS, but they are not ground truth",
+    "- Confirmed People IN this photo always override any local face prematch hint",
     "- Format as a comma-separated list of names, or leave blank if uncertain",
     "",
     "PHOTO CORRECTION RULES:",
@@ -479,6 +497,7 @@ function buildCaptionPrompt(photo, captionMemory) {
     `Title: ${photo.title || "Not set"}`,
     `Description (public, owner-written): ${photo.description || "Not set"}`,
     `Notes (background context only, low priority): ${photo.notes_for_ai || "Not set"}`,
+    `Local face prematch hints (heuristic only): ${formatFacePrematchForPrompt(facePrematch)}`,
     "",
     "RECENT CAPTION MEMORY:",
     captionMemory || "No recent caption memory available.",
@@ -491,6 +510,27 @@ function buildCaptionPrompt(photo, captionMemory) {
     "ALT_TEXT: <one sentence describing what is visually in the image for accessibility>",
     "TITLE_SUGGESTION: <title here>",
   ].join("\n");
+}
+
+function formatFacePrematchForPrompt(facePrematch) {
+  if (!facePrematch || !Array.isArray(facePrematch.faces) || facePrematch.faces.length === 0) {
+    return "None";
+  }
+
+  const lines = facePrematch.faces.map((face) => {
+    const topName = face.top_name || "unknown";
+    const scoreLabel = face.top_score ? `${Math.round(face.top_score * 100)}%` : "0%";
+    const expressionLabel = Array.isArray(face.suggested_expression_tags) && face.suggested_expression_tags.length > 0
+      ? face.suggested_expression_tags.map((tag) => tag.name).join(", ")
+      : "none";
+    const candidateLabel = Array.isArray(face.candidates) && face.candidates.length > 1
+      ? `; alternates: ${face.candidates.slice(1).map((candidate) => `${candidate.name} ${Math.round(candidate.score * 100)}%`).join(", ")}`
+      : "";
+
+    return `face ${face.face_index + 1}: likely ${topName} (${scoreLabel}), expressions=${expressionLabel}${candidateLabel}`;
+  });
+
+  return lines.join(" | ");
 }
 
 function loadTagTaxonomy(db) {
