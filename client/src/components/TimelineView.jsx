@@ -426,7 +426,9 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
       currentPhoto.id === updatedPhoto.id ? updatedPhoto : currentPhoto
     )));
-    setEditingPhoto(updatedPhoto);
+    setEditingPhoto((currentPhoto) => (
+      currentPhoto?.id === updatedPhoto.id ? updatedPhoto : currentPhoto
+    ));
   }
 
   function handleDeletedPhoto(photoId) {

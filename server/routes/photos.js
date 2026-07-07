@@ -76,7 +76,7 @@ router.post("/:id/correction-preview", async (req, res) => {
     }
 
     const previewWidth = normalizePreviewWidth(req.body?.preview_width);
-    const sourceUrl = photo.small_url || photo.large_url;
+    const sourceUrl = photo.large_url || photo.small_url;
 
     if (!sourceUrl) {
       return res.status(400).json({ error: "Photo does not have a preview image URL" });
@@ -545,10 +545,10 @@ function normalizePreviewWidth(value) {
   const numericValue = Number(value);
 
   if (!Number.isFinite(numericValue)) {
-    return 520;
+    return 960;
   }
 
-  return Math.max(240, Math.min(720, Math.round(numericValue)));
+  return Math.max(240, Math.min(1000, Math.round(numericValue)));
 }
 
 function parseCsvList(value) {

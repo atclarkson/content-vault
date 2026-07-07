@@ -174,10 +174,12 @@ export default function AnalyzeQueueModal({
   const [error, setError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [history, setHistory] = useState([]);
+  const [initialQueueLength, setInitialQueueLength] = useState(0);
   const [correctionPreviewByKey, setCorrectionPreviewByKey] = useState({});
   const analysisByPhotoIdRef = useRef({});
   const wasOpenRef = useRef(false);
   const correctionPreviewByKeyRef = useRef({});
+  const bodyScrollRef = useRef(null);
 
   useEffect(() => {
     analysisByPhotoIdRef.current = analysisByPhotoId;
@@ -215,6 +217,7 @@ export default function AnalyzeQueueModal({
       : photos;
 
     setQueue(orderedQueue);
+    setInitialQueueLength(orderedQueue.length);
     setAnalysisByPhotoId({});
     setError("");
     setActivityLog([]);
@@ -366,6 +369,12 @@ export default function AnalyzeQueueModal({
     notesForAi,
   ]);
 
+  useEffect(() => {
+    if (bodyScrollRef.current) {
+      bodyScrollRef.current.scrollTop = 0;
+    }
+  }, [currentPhoto?.id]);
+
   async function ensureCorrectionPreview(photo, editRecipe, reason) {
     const cacheKey = buildRecipeCacheKey(photo?.id, editRecipe);
 
@@ -404,7 +413,7 @@ export default function AnalyzeQueueModal({
 
     try {
       const blob = await getPhotoCorrectionPreview(photo.id, editRecipe, {
-        previewWidth: 520,
+        previewWidth: 1280,
       });
       const objectUrl = URL.createObjectURL(blob);
 
@@ -873,484 +882,487 @@ export default function AnalyzeQueueModal({
         : currentPhotoAnalysisStatus === "error"
           ? "Analysis failed"
           : "Waiting";
+  const progressValue =
+    initialQueueLength > 0
+      ? Math.max(0, initialQueueLength - queue.length) / initialQueueLength
+      : 0;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/60 p-4 2xl:p-6"
+      className="fixed inset-0 z-50 bg-stone-950/60"
       onClick={onClose}
     >
       <div
-        className="flex h-[94vh] w-[96vw] max-w-[1700px] overflow-hidden border border-stone-300 bg-white shadow-2xl"
+        className="flex h-full w-full flex-col bg-white shadow-2xl lg:mx-auto lg:h-[94vh] lg:max-w-4xl lg:border lg:border-stone-300"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex min-w-0 flex-1 flex-col border-r border-stone-200">
-          <div className="border-b border-stone-200 px-6 py-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-                  Analyze Queue
-                </p>
-                <h2 className="mt-2 text-xl font-semibold text-stone-900">
-                  {queue.length > 0
-                    ? `${queue.length} photo${queue.length === 1 ? "" : "s"} remaining`
-                    : "Queue complete"}
-                </h2>
-                {currentPhoto ? (
-                  <div className="mt-2 space-y-1 text-sm text-stone-500">
-                    <p>{currentPhoto.original_filename}</p>
-                    <p>{formatCapturedDateTime(currentPhoto.captured_at)}</p>
-                    <p>{formatPhotoLocation(currentPhoto)}</p>
-                    <p className="font-medium text-amber-700">
-                      {currentPhotoStatusLabel}
-                    </p>
+        {currentPhoto ? (
+          <>
+            <div className="sticky top-0 z-10 border-b border-stone-200 bg-white/95 backdrop-blur">
+              <div className="px-4 py-3 lg:px-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3">
+                      <p className="shrink-0 text-sm font-medium text-stone-700">
+                        {queue.length > 0
+                          ? `${queue.length} remaining`
+                          : "Queue complete"}
+                      </p>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-200">
+                        <div
+                          className="h-full rounded-full transition-[width]"
+                          style={{
+                            width: `${Math.max(0, Math.min(100, progressValue * 100))}%`,
+                            backgroundImage: "linear-gradient(-225deg, #FF057C 0%, #8D0B93 50%, #321575 100%)",
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                ) : null}
+
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-700 transition hover:border-stone-400 hover:bg-stone-100"
+                      aria-label="Close"
+                    >
+                      <i className="ti ti-x text-base" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-stone-500">
+                  <span className="min-w-0 truncate font-medium text-stone-900">
+                    {currentPhoto.original_filename}
+                  </span>
+                  <span className="text-stone-300">·</span>
+                  <span>{formatCapturedDateTime(currentPhoto.captured_at)}</span>
+                  <span className="text-stone-300">·</span>
+                  <span>{formatPhotoLocation(currentPhoto)}</span>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {currentPhotoStatusLabel}
+                  </span>
+                </div>
               </div>
 
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={handleBack}
-                  disabled={history.length === 0 || isApplying || isReanalyzing}
-                  className="btn-secondary px-4 py-2 text-sm"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="btn-secondary px-4 py-2 text-sm"
-                >
-                  Close
-                </button>
+              <div className="border-t border-stone-200 px-4 py-3 lg:px-6">
+                <div className="mx-auto w-full max-w-3xl overflow-hidden border border-stone-300 bg-stone-100">
+                  <div className="relative flex max-h-[40vh] min-h-[180px] items-center justify-center p-2 sm:min-h-[220px]">
+                    {currentPhoto.large_url ? (
+                      <img
+                        src={
+                          fieldSelection.photoCorrection && correctionPreviewUrl
+                            ? correctionPreviewUrl
+                            : currentPhoto.large_url
+                        }
+                        alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
+                        No image available
+                      </div>
+                    )}
+                    <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-stone-950/75 px-2.5 py-1 text-xs font-medium text-white">
+                      {fieldSelection.photoCorrection ? "Corrected" : "Original"}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
 
-          {currentPhoto ? (
-            <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-0 2xl:grid-cols-[620px_minmax(0,1fr)]">
-              <div className="flex min-h-0 flex-col overflow-hidden border-r border-stone-200 p-6">
-                <div className="mx-auto w-full max-w-[620px] shrink-0">
-                  {currentSuggestionState?.editRecipe ? (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="overflow-hidden border border-stone-300 bg-stone-100">
-                          <div className="border-b border-stone-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.24em] text-stone-500">
-                            Original
-                          </div>
-                          <div className="flex h-[200px] items-center justify-center p-2 2xl:h-[260px]">
-                            {currentPhoto.large_url ? (
-                              <img
-                                src={currentPhoto.large_url}
-                                alt={currentPhoto.alt_text || currentPhoto.original_filename}
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
-                                No image available
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="overflow-hidden border border-stone-300 bg-stone-100">
-                          <div className="border-b border-stone-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.24em] text-stone-500">
-                            Corrected Preview
-                          </div>
-                          <div className="flex h-[200px] items-center justify-center p-2 2xl:h-[260px]">
-                            {isLoadingCorrectionPreview ? (
-                              <div className="text-sm text-stone-500">Generating preview...</div>
-                            ) : correctionPreviewUrl ? (
-                              <img
-                                src={correctionPreviewUrl}
-                                alt="Corrected preview"
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="text-sm text-stone-500">
-                                {correctionPreviewError || "No corrected preview available"}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-3">
-                        <label className="inline-flex items-center gap-2 text-sm font-medium text-stone-700">
-                          <input
-                            type="checkbox"
-                            checked={fieldSelection.photoCorrection}
-                            onChange={() => toggleField("photoCorrection")}
-                            className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                          />
-                          Apply photo correction
-                        </label>
-                        {currentSuggestionState.editRecipe.notes ? (
-                          <p className="mt-2 text-sm text-stone-600">
-                            {currentSuggestionState.editRecipe.notes}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex h-[220px] items-center justify-center overflow-hidden border border-stone-300 bg-stone-100 2xl:h-[260px]">
-                      {currentPhoto.large_url ? (
-                        <img
-                          src={currentPhoto.large_url}
-                          alt={currentPhoto.alt_text || currentPhoto.original_filename}
-                          className="h-full w-full object-contain"
+            <div ref={bodyScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+              <div className="mx-auto w-full max-w-3xl space-y-5">
+                {currentSuggestionState?.editRecipe ? (
+                  <section className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="inline-flex items-center gap-2 text-[11px] font-medium text-stone-500">
+                        <i className="ti ti-wand text-base" aria-hidden="true" />
+                        <span>Photo correction</span>
+                      </p>
+                      <label className="inline-flex items-center gap-2 text-sm text-stone-700">
+                        <input
+                          type="checkbox"
+                          checked={fieldSelection.photoCorrection}
+                          onChange={() => toggleField("photoCorrection")}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
                         />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
-                          No image available
-                        </div>
-                      )}
+                        Apply photo correction
+                      </label>
                     </div>
-                  )}
-                </div>
+                    {currentSuggestionState.editRecipe.notes ? (
+                      <p className="mt-2 text-sm text-stone-600">
+                        {currentSuggestionState.editRecipe.notes}
+                      </p>
+                    ) : null}
+                  </section>
+                ) : null}
 
-                <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-2">
-                  <div className="grid gap-3 text-sm text-stone-600">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                        Current Title
-                      </p>
-                      <p className="mt-1 text-stone-800">
-                        {currentPhoto.title || "Not set"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                        Current Tags
-                      </p>
-                      <p className="mt-1 text-stone-800">
-                        {currentPhoto.tags && currentPhoto.tags.length > 0
-                          ? currentPhoto.tags.join(", ")
-                          : "No tags yet"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                        Prefetch Buffer
-                      </p>
-                      <div className="mt-2 space-y-2">
-                        {prefetchedPhotos.length > 0 ? (
-                          prefetchedPhotos.map((photo, index) => {
-                            const analysis =
-                              analysisByPhotoId[photo.id] || null;
-                            const previewKey = buildRecipeCacheKey(
-                              photo.id,
-                              analysis?.suggestions?.editRecipe,
-                            );
-                            const previewState =
-                              correctionPreviewByKey[previewKey] || null;
-                            const statusLabel =
-                              analysis?.status === "done"
-                                ? analysis?.suggestions?.editRecipe
-                                  ? previewState?.status === "done"
-                                    ? "Ready"
-                                    : previewState?.status === "loading"
-                                      ? "Previewing..."
-                                      : previewState?.status === "error"
-                                        ? "Preview failed"
-                                        : "Analysis ready"
-                                  : "Ready"
-                                : analysis?.status === "loading"
-                                  ? "Analyzing..."
-                                  : analysis?.status === "error"
-                                    ? "Failed"
-                                    : "Waiting";
-
-                            return (
-                              <div key={photo.id}>
-                                <p className="text-stone-800">
-                                  {index + 1}. {photo.original_filename}
-                                </p>
-                                <p className="mt-1 text-xs text-stone-500">
-                                  {statusLabel}
-                                </p>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <p className="text-stone-800">
-                            No more photos in queue
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="border border-stone-300 bg-stone-50 p-3">
-                      <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                        Queue Activity
-                      </p>
-                      <div className="mt-2 max-h-[180px] space-y-2 overflow-y-auto pr-1">
-                        {activityLog.length > 0 ? (
-                          activityLog.map((entry) => (
-                            <p
-                              key={entry.id}
-                              className="text-xs leading-5 text-stone-600"
-                            >
-                              <span className="font-medium text-stone-800">
-                                {entry.time}
-                              </span>{" "}
-                              {entry.message}
-                            </p>
-                          ))
-                        ) : (
-                          <p className="text-xs text-stone-500">
-                            No queue activity yet.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-col">
-                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-                  <div className="space-y-5">
-                    <label className="block rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-                      <div className="mb-2 flex items-center justify-between gap-4">
-                        <span className="text-xs uppercase tracking-[0.24em] text-amber-800">
-                          Notes for AI
-                        </span>
-                        <label className="inline-flex items-center gap-2 text-sm text-amber-900">
-                          <input
-                            type="checkbox"
-                            checked={fieldSelection.notes}
-                            onChange={() => toggleField("notes")}
-                            className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-400"
-                          />
-                          Apply notes
-                        </label>
-                      </div>
-                      <textarea
-                        value={notesForAi}
-                        onChange={(event) => setNotesForAi(event.target.value)}
-                        className="field min-h-[120px] resize-y border-amber-300 bg-white/90"
+                <label className="block rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-4">
+                    <span className="inline-flex items-center gap-2 text-[11px] font-medium text-amber-800">
+                      <i className="ti ti-message-2 text-base" aria-hidden="true" />
+                      <span>Notes for AI</span>
+                    </span>
+                    <label className="inline-flex items-center gap-2 text-sm text-amber-900">
+                      <input
+                        type="checkbox"
+                        checked={fieldSelection.notes}
+                        onChange={() => toggleField("notes")}
+                        className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-400"
                       />
-                      {!currentNotesMatchSavedValue ? (
-                        <p className="mt-2 text-sm text-amber-900/80">
-                          Notes changed. Click reanalyze to regenerate
-                          suggestions using these notes.
-                        </p>
-                      ) : null}
+                      Apply notes
                     </label>
+                  </div>
+                  <textarea
+                    value={notesForAi}
+                    onChange={(event) => setNotesForAi(event.target.value)}
+                    className="field min-h-[120px] resize-y border-amber-300 bg-white/90"
+                  />
+                  {!currentNotesMatchSavedValue ? (
+                    <p className="mt-2 text-sm text-amber-900/80">
+                      Notes changed. Click reanalyze to regenerate suggestions using these notes.
+                    </p>
+                  ) : null}
+                </label>
 
-                    <div className="flex flex-wrap items-center gap-3">
+                <section className="border border-stone-300 bg-stone-50 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="inline-flex items-center gap-2 text-[11px] font-medium text-stone-500">
+                      <i className="ti ti-users text-base" aria-hidden="true" />
+                      <span>People</span>
+                    </p>
+                    <label className="inline-flex items-center gap-2 text-sm text-stone-700">
+                      <input
+                        type="checkbox"
+                        checked={fieldSelection.people}
+                        onChange={() => toggleField("people")}
+                        className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                      />
+                      Apply people
+                    </label>
+                  </div>
+
+                  {currentSuggestionState?.people &&
+                  currentSuggestionState.people.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-stone-600">
+                        AI suggestion: {currentSuggestionState.people.join(", ")}
+                      </span>
                       <button
                         type="button"
-                        onClick={handleReanalyze}
-                        disabled={isApplying || isReanalyzing}
-                        className="btn-secondary"
+                        onClick={applySuggestedPeople}
+                        className="btn-secondary px-3 py-1.5 text-sm"
                       >
-                        {isReanalyzing ? "Reanalyzing..." : "Reanalyze"}
+                        Use Suggestion
                       </button>
-                      {!currentAnalysisIsFresh &&
-                      currentAnalysis?.suggestions ? (
-                        <span className="text-sm text-amber-700">
-                          Suggestions below were generated before your latest
-                          notes change.
-                        </span>
-                      ) : null}
                     </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-stone-500">
+                      No family member suggestion for this photo.
+                    </p>
+                  )}
+
+                  <div className="mt-4">
+                    <PeopleSelector
+                      selectedIds={selectedPeopleIds}
+                      people={people}
+                      onChange={handlePeopleChange}
+                    />
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleReanalyze}
+                      disabled={isApplying || isReanalyzing}
+                      className={isApplying || isReanalyzing ? "btn-secondary" : "ai-button"}
+                    >
+                      {isReanalyzing ? (
+                        "Reanalyzing..."
+                      ) : (
+                        <>
+                          <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                          <span>Reanalyze</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {!currentAnalysisIsFresh &&
+                  currentAnalysis?.suggestions ? (
+                    <p className="text-sm text-amber-700">
+                      Suggestions below were generated before your latest notes change.
+                    </p>
+                  ) : null}
+
+                  {currentAnalysis?.status === "loading" ? (
+                    <div className="border border-stone-300 bg-stone-50 px-4 py-5 text-sm text-stone-600">
+                      Analyzing photo...
+                    </div>
+                  ) : null}
+
+                  {currentAnalysis?.status === "error" ? (
+                    <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {currentAnalysis.error}
+                    </div>
+                  ) : null}
+
+                  {error ? (
+                    <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {error}
+                    </div>
+                  ) : null}
+                </section>
+
+                {currentAnalysis?.status !== "loading" &&
+                currentAnalysis?.status !== "error" &&
+                currentSuggestionState ? (
+                  <>
+                    <SuggestionField
+                      icon="ti-heading"
+                      checked={fieldSelection.title}
+                      onToggle={() => toggleField("title")}
+                      label="Title"
+                      value={currentSuggestionState.title || "No title suggestion."}
+                    />
+
+                    <SuggestionField
+                      icon="ti-quote"
+                      checked={fieldSelection.aiCaption}
+                      onToggle={() => toggleField("aiCaption")}
+                      label="AI Caption"
+                      value={currentSuggestionState.aiCaption || "No caption suggestion."}
+                      multiline
+                    />
+
+                    <SuggestionField
+                      icon="ti-text-caption"
+                      checked={fieldSelection.altText}
+                      onToggle={() => toggleField("altText")}
+                      label="Alt Text"
+                      value={currentSuggestionState.altText || "No alt text suggestion."}
+                      multiline
+                    />
 
                     <section className="border border-stone-300 bg-stone-50 p-4">
                       <div className="flex items-center justify-between gap-4">
-                        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                          People
+                        <p className="inline-flex items-center gap-2 text-[11px] font-medium text-stone-500">
+                          <i className="ti ti-tags text-base" aria-hidden="true" />
+                          <span>Tags</span>
                         </p>
                         <label className="inline-flex items-center gap-2 text-sm text-stone-700">
                           <input
                             type="checkbox"
-                            checked={fieldSelection.people}
-                            onChange={() => toggleField("people")}
+                            checked={fieldSelection.tags}
+                            onChange={() => toggleField("tags")}
                             className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
                           />
-                          Apply people
+                          Apply tags
                         </label>
                       </div>
 
-                      {currentSuggestionState?.people &&
-                      currentSuggestionState.people.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <span className="text-sm text-stone-600">
-                            AI suggestion:{" "}
-                            {currentSuggestionState.people.join(", ")}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={applySuggestedPeople}
-                            className="btn-secondary px-3 py-1.5 text-sm"
-                          >
-                            Use Suggestion
-                          </button>
-                        </div>
+                      {currentSuggestionState.tagRecords.length > 0 ? (
+                        <>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {currentSuggestionState.tagRecords.map((tag) => (
+                              <span
+                                key={tag.name}
+                                className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700"
+                              >
+                                <span
+                                  className={`h-2.5 w-2.5 rounded-full border border-stone-400 ${getGroupColorClass(tag.groupColor)}`}
+                                />
+                                <span>{tag.name}</span>
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-3 text-sm text-stone-600">
+                            Resulting tags: {currentSuggestionState.tags.join(", ")}
+                          </p>
+                        </>
                       ) : (
-                        <p className="mt-3 text-sm text-stone-500">
-                          No family member suggestion for this photo.
+                        <p className="mt-2 text-sm text-stone-500">
+                          No tag suggestions.
                         </p>
                       )}
-
-                      <div className="mt-4">
-                        <PeopleSelector
-                          selectedIds={selectedPeopleIds}
-                          people={people}
-                          onChange={handlePeopleChange}
-                        />
-                      </div>
                     </section>
 
-                    {currentAnalysis?.status === "loading" ? (
-                      <div className="border border-stone-300 bg-stone-50 px-4 py-5 text-sm text-stone-600">
-                        Analyzing photo...
-                      </div>
-                    ) : currentAnalysis?.status === "error" ? (
-                      <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {currentAnalysis.error}
-                      </div>
-                    ) : currentSuggestionState ? (
-                      <>
-                        <div className="grid gap-5 2xl:grid-cols-2">
-                          <SuggestionField
-                            checked={fieldSelection.title}
-                            onToggle={() => toggleField("title")}
-                            label="Title"
-                            value={
-                              currentSuggestionState.title ||
-                              "No title suggestion."
-                            }
-                          />
+                    <details className="rounded-xl border border-stone-200 bg-stone-50/70 p-4 text-sm text-stone-700">
+                      <summary className="cursor-pointer list-none text-[11px] font-medium text-stone-500">
+                        <span className="inline-flex items-center gap-2">
+                          <i className="ti ti-info-circle text-base" aria-hidden="true" />
+                          Details
+                        </span>
+                      </summary>
 
-                          <SuggestionField
-                            checked={fieldSelection.altText}
-                            onToggle={() => toggleField("altText")}
-                            label="Alt Text"
-                            value={
-                              currentSuggestionState.altText ||
-                              "No alt text suggestion."
-                            }
-                            multiline
-                          />
+                      <div className="mt-4 space-y-4">
+                        <div>
+                          <p className="text-[11px] font-medium text-stone-500">
+                            Current title
+                          </p>
+                          <p className="mt-1 text-stone-800">
+                            {currentPhoto.title || "Not set"}
+                          </p>
                         </div>
 
-                        <SuggestionField
-                          checked={fieldSelection.aiCaption}
-                          onToggle={() => toggleField("aiCaption")}
-                          label="AI Caption"
-                          value={
-                            currentSuggestionState.aiCaption ||
-                            "No caption suggestion."
-                          }
-                          multiline
-                        />
+                        <div>
+                          <p className="text-[11px] font-medium text-stone-500">
+                            Current tags
+                          </p>
+                          <p className="mt-1 text-stone-800">
+                            {currentPhoto.tags && currentPhoto.tags.length > 0
+                              ? currentPhoto.tags.join(", ")
+                              : "No tags yet"}
+                          </p>
+                        </div>
 
-                        <section className="border border-stone-300 bg-stone-50 p-4">
-                          <div className="flex items-center justify-between gap-4">
-                            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                              Tags
-                            </p>
-                            <label className="inline-flex items-center gap-2 text-sm text-stone-700">
-                              <input
-                                type="checkbox"
-                                checked={fieldSelection.tags}
-                                onChange={() => toggleField("tags")}
-                                className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                              />
-                              Apply tags
-                            </label>
-                          </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-stone-500">
+                            Prefetch buffer
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {prefetchedPhotos.length > 0 ? (
+                              prefetchedPhotos.map((photo, index) => {
+                                const analysis =
+                                  analysisByPhotoId[photo.id] || null;
+                                const previewKey = buildRecipeCacheKey(
+                                  photo.id,
+                                  analysis?.suggestions?.editRecipe,
+                                );
+                                const previewState =
+                                  correctionPreviewByKey[previewKey] || null;
+                                const statusLabel =
+                                  analysis?.status === "done"
+                                    ? analysis?.suggestions?.editRecipe
+                                      ? previewState?.status === "done"
+                                        ? "Ready"
+                                        : previewState?.status === "loading"
+                                          ? "Previewing..."
+                                          : previewState?.status === "error"
+                                            ? "Preview failed"
+                                            : "Analysis ready"
+                                      : "Ready"
+                                    : analysis?.status === "loading"
+                                      ? "Analyzing..."
+                                      : analysis?.status === "error"
+                                        ? "Failed"
+                                        : "Waiting";
 
-                          {currentSuggestionState.tagRecords.length > 0 ? (
-                            <>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {currentSuggestionState.tagRecords.map(
-                                  (tag) => (
-                                    <span
-                                      key={tag.name}
-                                      className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700"
-                                    >
-                                      <span
-                                        className={`h-2.5 w-2.5 rounded-full border border-stone-400 ${getGroupColorClass(tag.groupColor)}`}
-                                      />
-                                      <span>{tag.name}</span>
-                                    </span>
-                                  ),
-                                )}
-                              </div>
-                              <p className="mt-3 text-sm text-stone-600">
-                                Resulting tags:{" "}
-                                {currentSuggestionState.tags.join(", ")}
+                                return (
+                                  <div key={photo.id}>
+                                    <p className="text-stone-800">
+                                      {index + 1}. {photo.original_filename}
+                                    </p>
+                                    <p className="mt-1 text-xs text-stone-500">
+                                      {statusLabel}
+                                    </p>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <p className="text-stone-800">
+                                No more photos in queue
                               </p>
-                            </>
-                          ) : (
-                            <p className="mt-2 text-sm text-stone-500">
-                              No tag suggestions.
-                            </p>
-                          )}
-                        </section>
-                      </>
-                    ) : (
-                      <div className="border border-stone-300 bg-stone-50 px-4 py-5 text-sm text-stone-600">
-                        Waiting for analysis to start...
-                      </div>
-                    )}
+                            )}
+                          </div>
+                        </div>
 
-                    {error ? (
-                      <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {error}
+                        <div className="border border-stone-300 bg-white p-3">
+                          <p className="text-[11px] font-medium text-stone-500">
+                            Queue activity
+                          </p>
+                          <div className="mt-2 max-h-[180px] space-y-2 overflow-y-auto pr-1">
+                            {activityLog.length > 0 ? (
+                              activityLog.map((entry) => (
+                                <p
+                                  key={entry.id}
+                                  className="text-xs leading-5 text-stone-600"
+                                >
+                                  <span className="font-medium text-stone-800">
+                                    {entry.time}
+                                  </span>{" "}
+                                  {entry.message}
+                                </p>
+                              ))
+                            ) : (
+                              <p className="text-xs text-stone-500">
+                                No queue activity yet.
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    ) : null}
+                    </details>
+                  </>
+                ) : currentAnalysis?.status === "loading" ||
+                  currentAnalysis?.status === "error" ? null : (
+                  <div className="border border-stone-300 bg-stone-50 px-4 py-5 text-sm text-stone-600">
+                    Waiting for analysis to start...
                   </div>
-                </div>
-
-                <div className="border-t border-stone-200 px-6 py-4">
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={handleApplyAndAdvance}
-                      disabled={
-                        isApplying ||
-                        isReanalyzing ||
-                        currentAnalysis?.status === "loading" ||
-                        !currentSuggestionState
-                      }
-                      className="btn-primary"
-                    >
-                      {isApplying ? "Applying..." : "Apply and Next"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSkip}
-                      disabled={isApplying}
-                      className="btn-secondary"
-                    >
-                      Skip
-                    </button>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
-          ) : (
-            <div className="flex flex-1 items-center justify-center px-8 py-12 text-center">
-              <div>
-                <p className="text-lg font-semibold text-stone-900">
-                  Analyze queue complete
-                </p>
-                <p className="mt-2 text-sm text-stone-500">
-                  There are no more incomplete photos in this queue.
-                </p>
+
+            <div className="sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 py-4 backdrop-blur lg:px-6">
+              <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleBack}
+                    disabled={history.length === 0 || isApplying || isReanalyzing}
+                    className="btn-secondary"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSkip}
+                    disabled={isApplying}
+                    className="btn-secondary"
+                  >
+                    Skip
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleApplyAndAdvance}
+                  disabled={
+                    isApplying ||
+                    isReanalyzing ||
+                    currentAnalysis?.status === "loading" ||
+                    !currentSuggestionState
+                  }
+                  className="btn-primary"
+                >
+                  {isApplying ? "Applying..." : "Apply and Next"}
+                </button>
               </div>
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="flex flex-1 items-center justify-center px-8 py-12 text-center">
+            <div>
+              <p className="text-lg font-semibold text-stone-900">
+                Analyze queue complete
+              </p>
+              <p className="mt-2 text-sm text-stone-500">
+                There are no more incomplete photos in this queue.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function SuggestionField({
+  icon,
   checked,
   onToggle,
   label,
@@ -1360,8 +1372,9 @@ function SuggestionField({
   return (
     <section className="border border-stone-300 bg-stone-50 p-4">
       <div className="flex items-center justify-between gap-4">
-        <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
-          {label}
+        <p className="inline-flex items-center gap-2 text-[11px] font-medium text-stone-500">
+          {icon ? <i className={`ti ${icon} text-base`} aria-hidden="true" /> : null}
+          <span>{label}</span>
         </p>
         <label className="inline-flex items-center gap-2 text-sm text-stone-700">
           <input
