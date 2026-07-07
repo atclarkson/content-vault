@@ -246,6 +246,12 @@ export async function updateSetting(key, value) {
   return jsonRequest(`/api/settings/${encodeURIComponent(key)}`, "PUT", { value });
 }
 
+export async function logoutBrowserSession() {
+  return request("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
 export async function importDestinations(file) {
   const formData = new FormData();
   formData.append("file", file);

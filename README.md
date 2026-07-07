@@ -37,6 +37,11 @@ YOUTUBE_API_KEY=
 
 # App
 PORT=3000
+AUTH_SECRET=
+AUTH_URL=http://localhost:3000
+ALLOWED_EMAIL=clarksontravels@gmail.com
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 ```
 
 4. Start the app:
@@ -46,6 +51,24 @@ npm run dev
 ```
 
 The Express app runs at `http://localhost:3000`. Vite runs alongside it for the frontend during development.
+
+## Google Login Setup
+
+Browser login uses Google OAuth directly in the Express app and keeps API/MCP auth unchanged.
+
+- Redirect URI: `${AUTH_URL}/api/auth/callback/google`
+- Local redirect URI: `http://localhost:3000/api/auth/callback/google`
+- Hosted redirect URI example: `https://al-vault.com/api/auth/callback/google`
+
+Set these env vars:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `AUTH_SECRET`
+- `AUTH_URL`
+- `ALLOWED_EMAIL`
+
+If you are testing Google login locally, open the app through `http://localhost:3000`. The Vite dev server on `http://localhost:5173` does not enforce the server-side page redirect.
 
 ## Run Without VSCode
 
@@ -212,3 +235,14 @@ Back up both of these:
 - Cloudflare R2 bucket contents
 
 The database contains all catalog metadata, tags, people links, statuses, and location edits. The R2 bucket contains the original files and generated image derivatives. You need both for a complete restore.
+
+## Auth Smoke Test
+
+1. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_SECRET`, `AUTH_URL`, `ALLOWED_EMAIL`, `API_SECRET_KEY`, and `VITE_API_KEY`.
+2. Add `http://localhost:3000/api/auth/callback/google` to the Google Cloud Console OAuth client.
+3. Start the app and open `http://localhost:3000`.
+4. Confirm an unauthenticated request to `/` redirects to `/login`.
+5. Sign in with `clarksontravels@gmail.com` and confirm you land on `/`.
+6. Sign out and confirm you return to `/login`.
+7. Try a different Google account and confirm `/login` shows `Not authorized`.
+8. Confirm your MCP endpoint and API callers still work with their existing auth headers.

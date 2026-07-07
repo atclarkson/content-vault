@@ -1,6 +1,6 @@
 const path = require("path");
 const express = require("express");
-const { requireApiAuth } = require("./lib/auth");
+const { hasBrowserSession, requireApiAuth } = require("./lib/auth");
 const { initializeDatabase } = require("./lib/db");
 require("dotenv").config();
 
@@ -19,6 +19,7 @@ if (mcpPathToken) {
   console.warn("MCP endpoint disabled: MCP_PATH_TOKEN is not set");
 }
 
+app.use("/api/auth", require("./routes/auth"));
 app.use("/api", requireApiAuth);
 
 // API routes
@@ -43,8 +44,30 @@ app.use("/api/processing", require("./routes/processing"));
 app.use("/api/reconcile", require("./routes/reconcile"));
 
 // Serve React frontend (Phase 4 — client/dist won't exist until then)
-app.use(express.static(clientDistPath));
+app.use(express.static(clientDistPath, { index: false }));
 app.get("*", (req, res) => {
+  const assetLikePath = path.extname(req.path) !== "";
+  const iconLikePath =
+    req.path === "/favicon.ico" ||
+    req.path === "/icon" ||
+    req.path.startsWith("/icon.") ||
+    req.path.startsWith("/apple-touch-icon");
+
+  if (assetLikePath || iconLikePath) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const isLoginRoute = req.path === "/login";
+  const isAuthenticated = hasBrowserSession(req);
+
+  if (isLoginRoute && isAuthenticated) {
+    return res.redirect("/");
+  }
+
+  if (!isLoginRoute && !isAuthenticated) {
+    return res.redirect("/login");
+  }
+
   res.sendFile(path.join(clientDistPath, "index.html"), (error) => {
     if (!error) return;
     res.status(404).json({ error: "Client build not found" });
