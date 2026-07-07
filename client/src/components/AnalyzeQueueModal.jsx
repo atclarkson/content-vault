@@ -215,6 +215,14 @@ function buildRecipeCacheKey(photoId, editRecipe) {
   return `${photoId}:${JSON.stringify(editRecipe)}`;
 }
 
+function getCurrentFaceMatchIds(suggestionState) {
+  return new Set(
+    (suggestionState?.facePrematchFaces || [])
+      .map((face) => Number(face?.id))
+      .filter(Number.isFinite),
+  );
+}
+
 export default function AnalyzeQueueModal({
   isOpen,
   photos,
@@ -797,6 +805,13 @@ export default function AnalyzeQueueModal({
 
     try {
       const payload = {};
+      const currentFaceMatchIds = getCurrentFaceMatchIds(currentSuggestionState);
+      const acceptedFaceMatchIdsForPhoto = acceptedFaceMatchIds.filter((id) =>
+        currentFaceMatchIds.has(id),
+      );
+      const rejectedFaceMatchIdsForPhoto = rejectedFaceMatchIds.filter((id) =>
+        currentFaceMatchIds.has(id),
+      );
 
       if (fieldSelection.notes) {
         payload.notes_for_ai = notesForAi;
@@ -806,12 +821,12 @@ export default function AnalyzeQueueModal({
         payload.people = selectedPeopleIds;
       }
 
-      if (acceptedFaceMatchIds.length > 0) {
-        payload.accept_face_match_ids = acceptedFaceMatchIds;
+      if (acceptedFaceMatchIdsForPhoto.length > 0) {
+        payload.accept_face_match_ids = acceptedFaceMatchIdsForPhoto;
       }
 
-      if (rejectedFaceMatchIds.length > 0) {
-        payload.reject_face_match_ids = rejectedFaceMatchIds;
+      if (rejectedFaceMatchIdsForPhoto.length > 0) {
+        payload.reject_face_match_ids = rejectedFaceMatchIdsForPhoto;
       }
 
       if (currentSuggestionState.editRecipe) {
