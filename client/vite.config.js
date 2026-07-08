@@ -5,6 +5,9 @@ const path = require("path");
 module.exports = defineConfig({
   root: __dirname,
   envDir: path.resolve(__dirname, ".."),
+  define: {
+    __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString())
+  },
   plugins: [react()],
   build: {
     outDir: "dist",

@@ -21,6 +21,27 @@ const VIEW_LABELS = {
   settings: "Settings"
 };
 
+function formatBuildTime(value) {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "unknown";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(parsed);
+}
+
+function BuildStamp({ className = "" }) {
+  return (
+    <p className={`text-xs text-stone-500 ${className}`.trim()}>
+      Build: {formatBuildTime(__APP_BUILD_TIME__)}
+    </p>
+  );
+}
+
 function LoginPage() {
   const error = new URLSearchParams(window.location.search).get("error");
   const errorMessage =
@@ -92,6 +113,7 @@ function LoginPage() {
           <p className="mt-5 text-xs text-stone-500">
             Private personal project. Not a public service.
           </p>
+          <BuildStamp className="mt-2" />
         </div>
       </div>
     </main>
@@ -230,6 +252,10 @@ function MainApp() {
               <ExportView people={people} />
             </div>
           )}
+
+          <div className="mt-4 flex justify-end">
+            <BuildStamp />
+          </div>
         </div>
       </main>
     </div>
