@@ -437,7 +437,25 @@ export async function exportCatalog(filters = {}) {
   return request(`/api/export${buildQueryString(filters)}`);
 }
 
-export async function uploadPhotos(files, onProgress) {
+function buildUploadErrorMessage(status, responseText, parsed) {
+  if (parsed?.error) {
+    return parsed.error;
+  }
+
+  const text = typeof responseText === "string" ? responseText.trim() : "";
+
+  if (text) {
+    return text;
+  }
+
+  if (status === 413) {
+    return "Upload too large";
+  }
+
+  return "Upload failed";
+}
+
+function uploadPhotoBatch(files, onProgress, progressState) {
   const formData = new FormData();
 
   for (const file of Array.from(files || [])) {
@@ -491,17 +509,19 @@ export async function uploadPhotos(files, onProgress) {
 
       try {
         data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
-      } catch (error) {
-        reject(new Error("Invalid JSON response"));
-        return;
-      }
+      } catch {}
 
       if (xhr.status >= 200 && xhr.status < 300) {
+        if (!data) {
+          reject(new Error("Invalid JSON response"));
+          return;
+        }
+
         if (onProgress) {
           onProgress({
             phase: "complete",
-            loaded: 0,
-            total: 0,
+            loaded: progressState.total,
+            total: progressState.total,
             percent: 100
           });
         }
@@ -510,7 +530,7 @@ export async function uploadPhotos(files, onProgress) {
         return;
       }
 
-      reject(new Error(data?.error || "Upload failed"));
+      reject(new Error(buildUploadErrorMessage(xhr.status, xhr.responseText, data)));
     };
 
     xhr.onerror = () => {
@@ -519,6 +539,56 @@ export async function uploadPhotos(files, onProgress) {
 
     xhr.send(formData);
   });
+}
+
+export async function uploadPhotos(files, onProgress) {
+  const fileList = Array.from(files || []);
+  const total = fileList.reduce((sum, file) => sum + (file.size || 0), 0);
+  const results = [];
+  let completed = 0;
+
+  if (onProgress) {
+    onProgress({
+      phase: "starting",
+      loaded: 0,
+      total,
+      percent: 0
+    });
+  }
+
+  for (const file of fileList) {
+    const response = await uploadPhotoBatch([file], onProgress ? (event) => {
+      const batchLoaded = event.phase === "complete" ? file.size : Math.min(event.loaded || 0, file.size);
+      const loaded = Math.min(completed + batchLoaded, total);
+
+      onProgress({
+        phase: event.phase,
+        loaded,
+        total,
+        percent: total > 0 ? Math.round((loaded / total) * 100) : 100
+      });
+    } : null, {
+      completed,
+      total
+    });
+
+    if (Array.isArray(response?.data)) {
+      results.push(...response.data);
+    }
+
+    completed += file.size || 0;
+  }
+
+  if (onProgress) {
+    onProgress({
+      phase: "complete",
+      loaded: total,
+      total,
+      percent: 100
+    });
+  }
+
+  return { data: results };
 }
 
 export async function getProcessingStatus() {
