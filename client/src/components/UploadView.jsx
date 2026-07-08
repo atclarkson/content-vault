@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { uploadPhotos } from "../api";
 
 const ACCEPTED_FILE_TYPES = "image/*,.jpg,.jpeg,.png,.heic,.heif,.webp";
+const ACCEPTED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"]);
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(
@@ -54,42 +55,50 @@ function buildFileKey(file) {
   return `${file.name}-${file.lastModified}-${file.size}`;
 }
 
-function flattenUploadResults(responseData, files) {
-  const results = Array.isArray(responseData) ? responseData : [];
+function getFileExtension(filename) {
+  const lastDot = String(filename || "").lastIndexOf(".");
+  return lastDot >= 0 ? filename.slice(lastDot).toLowerCase() : "";
+}
 
-  return files.map((file, index) => {
-    const result = results[index];
+function classifyUploadFile(file) {
+  const extension = getFileExtension(file.name);
 
-    if (!result) {
-      return {
-        filename: file.name,
-        status: "error",
-        message: "No result returned"
-      };
-    }
+  if (ACCEPTED_EXTENSIONS.has(extension)) {
+    return { valid: true };
+  }
 
-    if (result.photo) {
-      return {
-        filename: result.photo.original_filename || file.name,
-        status: "done",
-        message: "Uploaded"
-      };
-    }
+  return {
+    valid: false,
+    message: `${file.name} is not supported. Only JPEG, PNG, HEIC, HEIF, and WebP files can be imported.`
+  };
+}
 
-    if (result.skipped) {
-      return {
-        filename: result.filename || file.name,
-        status: "duplicate",
-        message: result.reason || "duplicate"
-      };
-    }
-
+function getResultStatus(result) {
+  if (result?.photo) {
     return {
-      filename: file.name,
-      status: "error",
-      message: "Unexpected upload result"
+      status: "done",
+      message: "Uploaded"
     };
-  });
+  }
+
+  if (result?.skipped) {
+    return {
+      status: "duplicate",
+      message: result.reason || "duplicate"
+    };
+  }
+
+  if (result?.error) {
+    return {
+      status: "error",
+      message: result.error
+    };
+  }
+
+  return {
+    status: "error",
+    message: "Unexpected upload result"
+  };
 }
 
 function buildFileEntries(nextFiles) {
@@ -217,35 +226,74 @@ export default function UploadView({ onNavigate }) {
     }
 
     const mergedFiles = mergeFiles([], nextFiles);
-    const nextEntries = buildFileEntries(mergedFiles);
+    const supportedFiles = [];
+    const invalidEntries = [];
+
+    for (const file of mergedFiles) {
+      const classification = classifyUploadFile(file);
+
+      if (classification.valid) {
+        supportedFiles.push(file);
+        continue;
+      }
+
+      invalidEntries.push({
+        file,
+        key: buildFileKey(file),
+        filename: file.name,
+        sizeLabel: formatFileSize(file.size),
+        status: "error",
+        message: classification.message
+      });
+    }
+
+    const nextEntries = [...buildFileEntries(supportedFiles), ...invalidEntries];
 
     setFileEntries(nextEntries);
-    setIsUploading(true);
     setProgressState(buildEmptyProgressState());
     setError("");
 
+    if (supportedFiles.length === 0) {
+      if (invalidEntries.length > 0) {
+        setError("Some files were skipped because they are not supported.");
+      }
+      return;
+    }
+
+    setIsUploading(true);
+
     try {
-      setFileEntries((currentEntries) => currentEntries.map((entry) => ({
-        ...entry,
-        status: "uploading",
-        message: "Uploading now"
-      })));
+      setFileEntries((currentEntries) => currentEntries.map((entry) => (
+        entry.status === "waiting"
+          ? { ...entry, status: "uploading", message: "Uploading now" }
+          : entry
+      )));
 
-      const response = await uploadPhotos(mergedFiles, setProgressState);
-      const resultEntries = flattenUploadResults(response?.data, mergedFiles);
+      await uploadPhotos(supportedFiles, setProgressState, (index, result) => {
+        const key = buildFileKey(supportedFiles[index]);
+        const nextStatus = getResultStatus(result);
 
-      setFileEntries((currentEntries) => currentEntries.map((entry, index) => ({
-        ...entry,
-        status: resultEntries[index]?.status || "error",
-        message: resultEntries[index]?.message || "Unexpected upload result"
-      })));
+        setFileEntries((currentEntries) => currentEntries.map((entry) => (
+          entry.key === key
+            ? { ...entry, status: nextStatus.status, message: nextStatus.message }
+            : entry
+        )));
+      });
+
+      if (invalidEntries.length > 0) {
+        setError("Some files were skipped because they are not supported.");
+      }
     } catch (uploadError) {
       setError(uploadError.message || "Upload failed");
       setFileEntries((currentEntries) =>
         currentEntries.map((entry) => ({
           ...entry,
-          status: "error",
-          message: uploadError.message || "Upload failed"
+          status: entry.status === "done" || entry.status === "duplicate" || entry.status === "error"
+            ? entry.status
+            : "error",
+          message: entry.status === "done" || entry.status === "duplicate" || entry.status === "error"
+            ? entry.message
+            : (uploadError.message || "Upload failed")
         }))
       );
     } finally {

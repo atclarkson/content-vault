@@ -541,7 +541,7 @@ function uploadPhotoBatch(files, onProgress, progressState) {
   });
 }
 
-export async function uploadPhotos(files, onProgress) {
+export async function uploadPhotos(files, onProgress, onItemResult) {
   const fileList = Array.from(files || []);
   const total = fileList.reduce((sum, file) => sum + (file.size || 0), 0);
   const results = [];
@@ -556,24 +556,43 @@ export async function uploadPhotos(files, onProgress) {
     });
   }
 
-  for (const file of fileList) {
-    const response = await uploadPhotoBatch([file], onProgress ? (event) => {
-      const batchLoaded = event.phase === "complete" ? file.size : Math.min(event.loaded || 0, file.size);
-      const loaded = Math.min(completed + batchLoaded, total);
+  for (const [index, file] of fileList.entries()) {
+    try {
+      const response = await uploadPhotoBatch([file], onProgress ? (event) => {
+        const batchLoaded = event.phase === "complete" ? file.size : Math.min(event.loaded || 0, file.size);
+        const loaded = Math.min(completed + batchLoaded, total);
 
-      onProgress({
-        phase: event.phase,
-        loaded,
-        total,
-        percent: total > 0 ? Math.round((loaded / total) * 100) : 100
+        onProgress({
+          phase: event.phase,
+          loaded,
+          total,
+          percent: total > 0 ? Math.round((loaded / total) * 100) : 100
+        });
+      } : null, {
+        completed,
+        total
       });
-    } : null, {
-      completed,
-      total
-    });
 
-    if (Array.isArray(response?.data)) {
-      results.push(...response.data);
+      const result = Array.isArray(response?.data) ? response.data[0] : null;
+
+      if (result) {
+        results.push(result);
+        onItemResult?.(index, result);
+      } else {
+        const fallbackResult = {
+          filename: file.name,
+          error: "No result returned"
+        };
+        results.push(fallbackResult);
+        onItemResult?.(index, fallbackResult);
+      }
+    } catch (error) {
+      const errorResult = {
+        filename: file.name,
+        error: error.message || "Upload failed"
+      };
+      results.push(errorResult);
+      onItemResult?.(index, errorResult);
     }
 
     completed += file.size || 0;
