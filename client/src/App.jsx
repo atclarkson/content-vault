@@ -37,14 +37,61 @@ function LoginPage() {
           <img src={logo} alt="AL Vault" className="h-14 w-auto" />
           <h1 className="mt-6 text-3xl font-semibold tracking-tight text-stone-950">AL Vault</h1>
           <p className="mt-3 text-sm text-stone-600">Sign in with Google to open the catalog.</p>
+          <p className="mt-2 max-w-sm text-sm text-stone-500">
+            Private personal family media archive for a single household. Access is limited to the owner.
+          </p>
+          <p className="mt-4 text-xs uppercase tracking-[0.24em] text-stone-500">
+            Maintained by Adam Clarkson of Adam and Linds
+          </p>
           {errorMessage ? (
             <div className="panel mt-6 w-full rounded-2xl border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
               {errorMessage}
             </div>
           ) : null}
+          <div className="mt-6 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm text-stone-600">
+            <p>
+              If you are looking at this, I have no idea how you found it, but I&apos;d love to know. Send us a
+              message on one of our socials or visit our website.
+            </p>
+            <p>
+              There&apos;s no need to try to log in. All emails are unauthorized except for my personal email.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm">
+              <a
+                href="https://www.youtube.com/@adamandlinds/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 font-medium text-stone-700 hover:text-stone-950"
+              >
+                <i className="ti ti-brand-youtube text-base" aria-hidden="true" />
+                YouTube
+              </a>
+              <a
+                href="https://www.instagram.com/adamandlinds/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 font-medium text-stone-700 hover:text-stone-950"
+              >
+                <i className="ti ti-brand-instagram text-base" aria-hidden="true" />
+                Instagram
+              </a>
+              <a
+                href="https://adamandlinds.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 font-medium text-stone-700 hover:text-stone-950"
+              >
+                <i className="ti ti-world text-base" aria-hidden="true" />
+                Website
+              </a>
+            </div>
+          </div>
           <a href="/api/auth/google" className="btn-primary mt-8 w-full rounded-2xl py-3">
             Sign in with Google
           </a>
+          <p className="mt-5 text-xs text-stone-500">
+            Private personal project. Not a public service.
+          </p>
         </div>
       </div>
     </main>
