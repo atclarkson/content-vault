@@ -109,18 +109,49 @@ function getFaceOverlayLabel(face) {
   return `Face ${Number(face?.face_index) + 1 || ""}`.trim();
 }
 
-function getFacePrematchLabel(match) {
-  if (!match) {
-    return "";
-  }
+const FACE_PREMATCH_ACCENTS = [
+  {
+    border: "#10b981",
+    badge: "#10b981",
+    soft: "#ecfdf5",
+    text: "#065f46",
+  },
+  {
+    border: "#f59e0b",
+    badge: "#f59e0b",
+    soft: "#fffbeb",
+    text: "#92400e",
+  },
+  {
+    border: "#3b82f6",
+    badge: "#3b82f6",
+    soft: "#eff6ff",
+    text: "#1d4ed8",
+  },
+  {
+    border: "#ec4899",
+    badge: "#ec4899",
+    soft: "#fdf2f8",
+    text: "#9d174d",
+  },
+  {
+    border: "#8b5cf6",
+    badge: "#8b5cf6",
+    soft: "#f5f3ff",
+    text: "#6d28d9",
+  },
+  {
+    border: "#14b8a6",
+    badge: "#14b8a6",
+    soft: "#f0fdfa",
+    text: "#115e59",
+  },
+];
 
-  const confidence = formatConfidence(match.score);
-
-  if (match.tentative) {
-    return `${match.name}? (${confidence})`;
-  }
-
-  return `${match.name} (${confidence})`;
+function getFaceAccent(faceIndex) {
+  const numericIndex = Number(faceIndex);
+  const safeIndex = Number.isFinite(numericIndex) ? numericIndex : 0;
+  return FACE_PREMATCH_ACCENTS[safeIndex % FACE_PREMATCH_ACCENTS.length];
 }
 
 function getImageOverlayMetrics(imageElement) {
@@ -964,36 +995,56 @@ export default function AnalyzeQueueModal({
     }));
   }
 
-  function acceptFacePrematchPerson(match) {
-    if (!match?.person_id) {
+  function applyFaceCandidate(face, candidate) {
+    const faceMatchId = Number(face?.id);
+    const personId = Number(candidate?.person_id);
+
+    if (!Number.isFinite(faceMatchId) || !Number.isFinite(personId)) {
       return;
     }
 
     setSelectedPeopleIds((currentValue) => [
-      ...new Set([...currentValue, match.person_id]),
+      ...new Set([...currentValue, personId]),
     ]);
-    setAcceptedFaceMatchIds((currentValue) => [
-      ...new Set([...currentValue, ...(match.face_match_ids || [])]),
-    ]);
-    setRejectedFaceMatchIds((currentValue) =>
-      currentValue.filter((id) => !(match.face_match_ids || []).includes(id)),
-    );
     setFieldSelection((currentValue) => ({
       ...currentValue,
       people: true,
     }));
-  }
 
-  function rejectFacePrematchPerson(match) {
-    if (!Array.isArray(match?.face_match_ids) || match.face_match_ids.length === 0) {
+    const topCandidatePersonId = Number(
+      face?.top_person_id || face?.candidates?.[0]?.person_id,
+    );
+
+    if (topCandidatePersonId === personId) {
+      setAcceptedFaceMatchIds((currentValue) => [
+        ...new Set([...currentValue, faceMatchId]),
+      ]);
+      setRejectedFaceMatchIds((currentValue) =>
+        currentValue.filter((id) => id !== faceMatchId),
+      );
       return;
     }
 
     setRejectedFaceMatchIds((currentValue) => [
-      ...new Set([...currentValue, ...match.face_match_ids]),
+      ...new Set([...currentValue, faceMatchId]),
     ]);
     setAcceptedFaceMatchIds((currentValue) =>
-      currentValue.filter((id) => !match.face_match_ids.includes(id)),
+      currentValue.filter((id) => id !== faceMatchId),
+    );
+  }
+
+  function rejectFacePrematchFace(face) {
+    const faceMatchId = Number(face?.id);
+
+    if (!Number.isFinite(faceMatchId)) {
+      return;
+    }
+
+    setRejectedFaceMatchIds((currentValue) => [
+      ...new Set([...currentValue, faceMatchId]),
+    ]);
+    setAcceptedFaceMatchIds((currentValue) =>
+      currentValue.filter((id) => id !== faceMatchId),
     );
   }
 
@@ -1026,6 +1077,22 @@ export default function AnalyzeQueueModal({
     fieldSelection.photoCorrection && correctionPreviewUrl
       ? correctionPreviewUrl
       : currentPhoto?.large_url || "";
+  const currentFaceRows = (currentSuggestionState?.facePrematchFaces || []).map((face) => {
+    const accent = getFaceAccent(face?.face_index);
+    const faceMatchId = Number(face?.id);
+    const isAccepted = Number.isFinite(faceMatchId) && acceptedFaceMatchIds.includes(faceMatchId);
+    const isRejected = Number.isFinite(faceMatchId) && rejectedFaceMatchIds.includes(faceMatchId);
+
+    return {
+      face,
+      accent,
+      isAccepted,
+      isRejected,
+      candidates: Array.isArray(face?.candidates)
+        ? face.candidates.filter((candidate) => Number(candidate?.person_id)).slice(0, 3)
+        : [],
+    };
+  });
 
   return (
     <div
@@ -1113,7 +1180,7 @@ export default function AnalyzeQueueModal({
                             }}
                           />
                           <FacePrematchOverlay
-                            faces={currentSuggestionState?.facePrematchFaces || []}
+                            faces={currentFaceRows}
                             metrics={previewImageMetrics}
                           />
                         </>
@@ -1223,56 +1290,74 @@ export default function AnalyzeQueueModal({
                     </p>
                   )}
 
-                  {currentSuggestionState?.facePrematchPeople &&
-                  currentSuggestionState.facePrematchPeople.length > 0 ? (
+                  {currentFaceRows.length > 0 ? (
                     <div className="mt-4 space-y-2">
                       <p className="text-sm text-stone-600">
                         Local face prematch:
                       </p>
                       <div className="space-y-2">
-                        {currentSuggestionState.facePrematchPeople.map((match) => {
-                          const isAccepted = (match.face_match_ids || []).every((id) =>
-                            acceptedFaceMatchIds.includes(id),
-                          );
-                          const isRejected = (match.face_match_ids || []).every((id) =>
-                            rejectedFaceMatchIds.includes(id),
-                          );
-
+                        {currentFaceRows.map(({ face, accent, isAccepted, isRejected, candidates }) => {
                           return (
                             <div
-                              key={`${match.person_id}-${match.face_match_ids?.join("-")}`}
-                              className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700"
+                              key={face.id || face.face_index}
+                              className="rounded-xl border bg-white px-3 py-3 text-sm text-stone-700"
+                              style={{
+                                borderColor: accent.border,
+                                boxShadow: `inset 0 0 0 1px ${accent.border}22`,
+                              }}
                             >
-                              <span>{getFacePrematchLabel(match)}</span>
-                              {match.tentative ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">
-                                  tentative
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium"
+                                  style={{
+                                    backgroundColor: accent.soft,
+                                    color: accent.text,
+                                  }}
+                                >
+                                  Face {Number(face.face_index) + 1}
                                 </span>
-                              ) : null}
-                              {isAccepted ? (
-                                <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
-                                  selected
+                                <span className="text-sm text-stone-700">
+                                  {getFaceOverlayLabel(face)}
                                 </span>
-                              ) : null}
-                              {isRejected ? (
-                                <span className="rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">
-                                  rejected
-                                </span>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => acceptFacePrematchPerson(match)}
-                                className="btn-secondary px-3 py-1.5 text-sm"
-                              >
-                                Use Local Match
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => rejectFacePrematchPerson(match)}
-                                className="btn-secondary px-3 py-1.5 text-sm"
-                              >
-                                Reject
-                              </button>
+                                {isAccepted ? (
+                                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
+                                    selected
+                                  </span>
+                                ) : null}
+                                {isRejected ? (
+                                  <span className="rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">
+                                    rejected
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {candidates.map((candidate, index) => {
+                                  const isPrimary =
+                                    Number(candidate.person_id) === Number(face.top_person_id || face.candidates?.[0]?.person_id);
+
+                                  return (
+                                    <button
+                                      key={`${face.id || face.face_index}-${candidate.person_id}`}
+                                      type="button"
+                                      onClick={() => applyFaceCandidate(face, candidate)}
+                                      className={`rounded-full px-3 py-1.5 text-sm ${
+                                        isPrimary
+                                          ? "bg-stone-900 text-white"
+                                          : "border border-stone-300 bg-white text-stone-700"
+                                      }`}
+                                    >
+                                      {candidate.name} {formatConfidence(candidate.score)}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  onClick={() => rejectFacePrematchFace(face)}
+                                  className="rounded-full border border-red-200 bg-white px-3 py-1.5 text-sm text-red-700"
+                                >
+                                  Reject
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -1644,7 +1729,7 @@ export default function AnalyzeQueueModal({
               }}
             />
             <FacePrematchOverlay
-              faces={currentSuggestionState?.facePrematchFaces || []}
+              faces={currentFaceRows}
               metrics={lightboxImageMetrics}
             />
           </div>
@@ -1695,7 +1780,9 @@ function FacePrematchOverlay({ faces, metrics }) {
 
   return (
     <div className="pointer-events-none absolute inset-0">
-      {faces.map((face) => {
+      {faces.map((entry) => {
+        const face = entry?.face || entry;
+        const accent = entry?.accent || getFaceAccent(face?.face_index);
         const box = face?.box || {};
         const left = metrics.left + (Number(box.x) / metrics.naturalWidth) * metrics.renderedWidth;
         const top = metrics.top + (Number(box.y) / metrics.naturalHeight) * metrics.renderedHeight;
@@ -1709,15 +1796,19 @@ function FacePrematchOverlay({ faces, metrics }) {
         return (
           <div
             key={face.id || face.face_index}
-            className="absolute border-2 border-emerald-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            className="absolute border-2 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
             style={{
               left,
               top,
               width,
               height,
+              borderColor: accent.border,
             }}
           >
-            <div className="absolute left-0 top-0 -translate-y-full rounded-t-md bg-emerald-500/95 px-2 py-1 text-[11px] font-medium leading-none text-white shadow">
+            <div
+              className="absolute left-0 top-0 -translate-y-full rounded-t-md px-2 py-1 text-[11px] font-medium leading-none text-white shadow"
+              style={{ backgroundColor: accent.badge }}
+            >
               {getFaceOverlayLabel(face)}
             </div>
           </div>
