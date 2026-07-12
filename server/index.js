@@ -76,6 +76,7 @@ function createApp(options = {}) {
   app.use("/api/videos", require("./routes/videos"));
   app.use("/api/research", require("./routes/research"));
   app.use("/api/settings", require("./routes/settings"));
+  app.use("/api/search", require("./routes/search"));
   app.use("/api/processing", require("./routes/processing"));
   app.use("/api/reconcile", require("./routes/reconcile"));
 

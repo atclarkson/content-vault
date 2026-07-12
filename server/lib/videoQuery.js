@@ -55,6 +55,7 @@ function normalizeVideoQueryOptions(options) {
 
   return {
     filters: {
+      ids: normalizeIdArray(filtersSource.ids),
       text: normalizeOptionalString(filtersSource.text),
       tagsAny: normalizeStringArray(filtersSource.tags_any),
       tagsAll: normalizeStringArray(filtersSource.tags_all),
@@ -77,6 +78,12 @@ function normalizeVideoQueryOptions(options) {
 function buildVideoQueryFilters(filters) {
   const conditions = ["videos.deleted_at IS NULL"];
   const params = [];
+
+  if (filters.ids.length > 0) {
+    const placeholders = createPlaceholders(filters.ids.length);
+    conditions.push(`videos.id IN (${placeholders})`);
+    params.push(...filters.ids);
+  }
 
   if (filters.text) {
     const searchPattern = `%${filters.text.toLowerCase()}%`;
@@ -306,3 +313,21 @@ function mapVideoView(video, view) {
 module.exports = {
   queryVideos
 };
+
+function normalizeIdArray(values) {
+  if (values === undefined || values === null) {
+    return [];
+  }
+
+  if (!Array.isArray(values)) {
+    throw new Error("ids must be an array of positive integers");
+  }
+
+  const ids = values.map((value) => Number(value));
+
+  if (ids.some((value) => !Number.isInteger(value) || value <= 0)) {
+    throw new Error("ids must be an array of positive integers");
+  }
+
+  return [...new Set(ids)];
+}

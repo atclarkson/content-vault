@@ -3,6 +3,7 @@ import {
   getDestinations,
   getJournalEntries,
   getPhotos,
+  searchSemantic,
   getVideos,
   updatePhoto,
   uploadPhotos
@@ -20,6 +21,12 @@ const CONTENT_TYPE_OPTIONS = [
   { id: "videos", label: "Videos", disabled: false },
   { id: "journal", label: "Journal", disabled: false }
 ];
+
+const CONTENT_TYPE_TO_SEMANTIC_TYPE = {
+  photos: "photo",
+  videos: "video",
+  journal: "journal"
+};
 
 const TIMELINE_SECTION_STYLE = {
   contentVisibility: "auto",
@@ -141,6 +148,28 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+function formatSemanticResultType(type) {
+  if (type === "photo") {
+    return "Photo";
+  }
+
+  if (type === "video") {
+    return "Video";
+  }
+
+  return "Journal";
+}
+
+function formatSemanticScore(score) {
+  const numericScore = Number(score);
+
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+
+  return `${Math.round(numericScore * 100)}%`;
+}
+
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 1023.98px)").matches
@@ -179,6 +208,11 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [analyzeQueueOrder, setAnalyzeQueueOrder] = useState("newest");
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [activeFilterCount, setActiveFilterCount] = useState(0);
+  const [semanticQueryInput, setSemanticQueryInput] = useState("");
+  const [activeSemanticQuery, setActiveSemanticQuery] = useState("");
+  const [semanticResults, setSemanticResults] = useState(null);
+  const [isSemanticLoading, setIsSemanticLoading] = useState(false);
+  const [semanticError, setSemanticError] = useState("");
   const contentScrollRef = useRef(null);
   const filterSheetStartYRef = useRef(0);
   const filterSheetCanDragRef = useRef(false);
@@ -422,6 +456,48 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setFilters({});
   }
 
+  async function handleSemanticSearchSubmit(event) {
+    event.preventDefault();
+
+    const query = semanticQueryInput.trim();
+
+    if (!query) {
+      setActiveSemanticQuery("");
+      setSemanticResults(null);
+      setSemanticError("");
+      return;
+    }
+
+    setIsSemanticLoading(true);
+    setSemanticError("");
+
+    try {
+      const response = await searchSemantic({
+        query,
+        limit: 15,
+        ...(CONTENT_TYPE_TO_SEMANTIC_TYPE[contentType]
+          ? { content_types: [CONTENT_TYPE_TO_SEMANTIC_TYPE[contentType]] }
+          : {})
+      });
+
+      setActiveSemanticQuery(query);
+      setSemanticResults(response?.data || null);
+    } catch (searchError) {
+      setSemanticError(searchError.message || "Failed to run AI search");
+      setActiveSemanticQuery(query);
+      setSemanticResults(null);
+    } finally {
+      setIsSemanticLoading(false);
+    }
+  }
+
+  function handleClearSemanticSearch() {
+    setSemanticQueryInput("");
+    setActiveSemanticQuery("");
+    setSemanticResults(null);
+    setSemanticError("");
+  }
+
   function handleSavedPhoto(updatedPhoto) {
     setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
       currentPhoto.id === updatedPhoto.id ? updatedPhoto : currentPhoto
@@ -630,6 +706,25 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setFilterSheetOffsetY(0);
   }
 
+  function openSemanticResult(result) {
+    if (!result?.record) {
+      return;
+    }
+
+    if (result.type === "photo") {
+      const fullPhoto = photos.find((photo) => photo.id === result.record.id) || result.record;
+      setEditingVideo(null);
+      setEditingPhoto(fullPhoto);
+      return;
+    }
+
+    if (result.type === "video") {
+      const fullVideo = videos.find((video) => video.id === result.record.id) || result.record;
+      setEditingPhoto(null);
+      setEditingVideo(fullVideo);
+    }
+  }
+
   return (
     <>
       <div className="relative flex min-h-0 flex-1 gap-6 overflow-hidden">
@@ -674,6 +769,29 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   <i className="ti ti-chevron-down text-base" />
                 </span>
               </label>
+
+              <form onSubmit={handleSemanticSearchSubmit} className="flex items-center gap-3">
+                <label className="relative block w-[360px]">
+                  <input
+                    type="search"
+                    value={semanticQueryInput}
+                    onChange={(event) => setSemanticQueryInput(event.target.value)}
+                    placeholder="AI search across photos, videos, journals"
+                    className="field pl-11"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-stone-500">
+                    <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                  </span>
+                </label>
+                <button type="submit" className="ai-button">
+                  Search
+                </button>
+                {(activeSemanticQuery || semanticQueryInput) ? (
+                  <button type="button" onClick={handleClearSemanticSearch} className="btn-secondary">
+                    Clear
+                  </button>
+                ) : null}
+              </form>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -712,6 +830,24 @@ export default function TimelineView({ people, tags, tagGroups }) {
           </div>
 
           <div className="space-y-3 lg:hidden">
+            <form onSubmit={handleSemanticSearchSubmit} className="flex items-center gap-3">
+              <label className="relative block min-w-0 flex-1">
+                <input
+                  type="search"
+                  value={semanticQueryInput}
+                  onChange={(event) => setSemanticQueryInput(event.target.value)}
+                  placeholder="AI search"
+                  className="field pl-11"
+                />
+                <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-stone-500">
+                  <i className="ti ti-sparkles text-base" aria-hidden="true" />
+                </span>
+              </label>
+              <button type="submit" className="ai-button px-4">
+                Go
+              </button>
+            </form>
+
             <div className="inline-flex w-full overflow-hidden rounded-xl border border-stone-300 bg-white">
               {CONTENT_TYPE_OPTIONS.map((option) => (
                 <button
@@ -847,6 +983,12 @@ export default function TimelineView({ people, tags, tagGroups }) {
           </div>
         ) : null}
 
+        {semanticError ? (
+          <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {semanticError}
+          </div>
+        ) : null}
+
         {isLoading ? (
           <section className="panel flex min-h-[360px] items-center justify-center p-8">
             <div className="text-center">
@@ -854,6 +996,120 @@ export default function TimelineView({ people, tags, tagGroups }) {
               <p className="mt-2 text-sm text-stone-500">Fetching destinations, photos, and videos.</p>
               <p className="mt-1 text-sm text-stone-500">Loading journal entries too.</p>
             </div>
+          </section>
+        ) : activeSemanticQuery ? (
+          <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Search</p>
+                <h2 className="mt-2 text-2xl font-semibold text-stone-900">
+                  {activeSemanticQuery}
+                </h2>
+                <p className="mt-2 text-sm text-stone-500">
+                  Natural-language results across photos, videos, and journal entries.
+                </p>
+              </div>
+
+              <button type="button" onClick={handleClearSemanticSearch} className="btn-secondary">
+                Clear Search
+              </button>
+            </div>
+
+            {isSemanticLoading ? (
+              <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
+                Running AI search...
+              </div>
+            ) : !semanticResults || semanticResults.items.length === 0 ? (
+              <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
+                No AI search results found for this query.
+              </div>
+            ) : (
+              <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+                <div className="mb-4 flex flex-wrap gap-3 text-xs uppercase tracking-[0.22em] text-stone-500">
+                  <span>{semanticResults.total_hits} hits</span>
+                  <span>{semanticResults.photos.length} photos</span>
+                  <span>{semanticResults.videos.length} videos</span>
+                  <span>{semanticResults.journals.length} journals</span>
+                </div>
+
+                <div className="space-y-4">
+                  {semanticResults.items.map((result, index) => {
+                    const scoreLabel = formatSemanticScore(result.score);
+                    const isClickable = result.type === "photo" || result.type === "video";
+
+                    return (
+                      <article
+                        key={`${result.type}-${result.record.id}-${index}`}
+                        className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.22em] text-stone-500">
+                              {formatSemanticResultType(result.type)}
+                            </p>
+                            <h3 className="mt-2 text-xl font-semibold text-stone-900">
+                              {result.record.title || result.record.original_filename || "Untitled"}
+                            </h3>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {scoreLabel ? (
+                              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+                                Match {scoreLabel}
+                              </span>
+                            ) : null}
+                            {isClickable ? (
+                              <button
+                                type="button"
+                                onClick={() => openSemanticResult(result)}
+                                className="btn-secondary"
+                              >
+                                Open
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 text-sm text-stone-600 md:grid-cols-3">
+                          <p>
+                            <span className="font-medium text-stone-900">Date:</span>{" "}
+                            {result.record.captured_at || result.record.published_at || result.record.date || "Unknown"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-stone-900">City:</span>{" "}
+                            {result.record.city || "Unknown"}
+                          </p>
+                          <p>
+                            <span className="font-medium text-stone-900">Country:</span>{" "}
+                            {result.record.country || "Unknown"}
+                          </p>
+                        </div>
+
+                        {result.record.people?.length > 0 ? (
+                          <p className="mt-4 text-sm text-stone-600">
+                            <span className="font-medium text-stone-900">People:</span>{" "}
+                            {result.record.people.map((person) => person.name).join(", ")}
+                          </p>
+                        ) : null}
+
+                        {result.record.tags?.length > 0 ? (
+                          <p className="mt-2 text-sm text-stone-600">
+                            <span className="font-medium text-stone-900">Tags:</span>{" "}
+                            {result.record.tags.join(", ")}
+                          </p>
+                        ) : null}
+
+                        {result.excerpt ? (
+                          <p className="mt-4 rounded-2xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+                            {result.excerpt}
+                          </p>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         ) : hasActiveFilters && !showNoContentDestinations ? (
           <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">

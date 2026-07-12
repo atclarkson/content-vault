@@ -95,6 +95,7 @@ function isMissingTableError(error) {
 
 function isQueryBadRequestError(error) {
   return error.message === "Boolean filters must be true or false"
+    || error.message === "ids must be an array of positive integers"
     || error.message.startsWith("Unsupported sort:")
     || error.message.startsWith("Unsupported view:")
     || error.message.startsWith("Value must be an integer between");
