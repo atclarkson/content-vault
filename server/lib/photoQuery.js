@@ -56,6 +56,9 @@ function normalizePhotoQueryFilters(filters) {
     tagsAny: normalizeStringArray(source.tags_any),
     city: normalizeOptionalString(source.city),
     country: normalizeOptionalString(source.country),
+    orientation: normalizePhotoOrientation(source.orientation),
+    minWidth: normalizePositiveInteger(source.min_width, null, 0, 100000),
+    minHeight: normalizePositiveInteger(source.min_height, null, 0, 100000),
     dateFrom: normalizeOptionalString(source.date_from),
     dateTo: normalizeOptionalString(source.date_to),
     processingStatus: normalizeOptionalString(source.processing_status),
@@ -154,6 +157,29 @@ function buildPhotoQueryFilters(filters) {
   if (filters.country) {
     conditions.push("LOWER(COALESCE(photos.country, '')) LIKE ?");
     params.push(`%${filters.country.toLowerCase()}%`);
+  }
+
+  if (filters.orientation || filters.minWidth !== null || filters.minHeight !== null) {
+    conditions.push("photos.width IS NOT NULL");
+    conditions.push("photos.height IS NOT NULL");
+  }
+
+  if (filters.orientation === "landscape") {
+    conditions.push("photos.width > photos.height");
+  } else if (filters.orientation === "portrait") {
+    conditions.push("photos.width < photos.height");
+  } else if (filters.orientation === "square") {
+    conditions.push("photos.width = photos.height");
+  }
+
+  if (filters.minWidth !== null) {
+    conditions.push("photos.width >= ?");
+    params.push(filters.minWidth);
+  }
+
+  if (filters.minHeight !== null) {
+    conditions.push("photos.height >= ?");
+    params.push(filters.minHeight);
   }
 
   if (filters.dateFrom) {
@@ -404,11 +430,25 @@ function normalizePhotoSort(value) {
 function normalizePhotoView(value) {
   const view = normalizeOptionalString(value) || "summary";
 
-  if (view !== "summary" && view !== "full") {
+  if (view !== "summary" && view !== "full" && view !== "blog") {
     throw new Error(`Unsupported view: ${view}`);
   }
 
   return view;
+}
+
+function normalizePhotoOrientation(value) {
+  const orientation = normalizeOptionalString(value);
+
+  if (!orientation) {
+    return null;
+  }
+
+  if (orientation !== "landscape" && orientation !== "portrait" && orientation !== "square") {
+    throw new Error(`Unsupported orientation: ${orientation}`);
+  }
+
+  return orientation;
 }
 
 function createPlaceholders(count) {
@@ -487,6 +527,27 @@ function mapPhotoView(photo, view) {
     };
   }
 
+  if (view === "blog") {
+    return {
+      id: photo.id,
+      uuid: photo.uuid,
+      title: photo.title,
+      alt_text: photo.alt_text,
+      ai_caption: photo.ai_caption,
+      notes_for_ai: photo.notes_for_ai,
+      large_url: photo.large_url,
+      small_url: photo.small_url,
+      width: photo.width,
+      height: photo.height,
+      captured_at: photo.captured_at,
+      city: photo.city,
+      country: photo.country,
+      location_label: photo.location_label,
+      people: photo.people || [],
+      tags: photo.tags || []
+    };
+  }
+
   return photo;
 }
 
@@ -506,5 +567,9 @@ module.exports = {
   queryPhotos,
   buildPhotoOrderByClause,
   buildMissingCondition,
-  normalizePhotoQueryOptions
+  buildPhotoQueryFilters,
+  normalizePhotoQueryFilters,
+  normalizePhotoQueryOptions,
+  normalizePhotoView,
+  mapPhotoView
 };

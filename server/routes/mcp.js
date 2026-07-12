@@ -7,6 +7,7 @@ const { queryPhotos } = require("../lib/photoQuery");
 const { queryVideos } = require("../lib/videoQuery");
 const { queryJournals } = require("../lib/journalQuery");
 const { queryDestinations } = require("../lib/destinationQuery");
+const { getTrip } = require("../lib/tripQuery");
 
 const router = express.Router();
 
@@ -35,11 +36,14 @@ function getServer() {
   });
 
   server.registerTool("search_photos", {
-    description: "Search the family travel photo catalog by date range, location, people, or tags. Returns photos with embeddable image URLs (thumbnail, small, large).",
+    description: "Search the family travel photo catalog by date range, location, people, tags, orientation, or resolution. Returns photos with embeddable image URLs. Use view \"blog\" for content-writing and caption workflows. For blog feature images, the intended path is orientation=\"landscape\". Use \"summary\" for lightweight browsing and \"full\" only when you need the complete photo record.",
     inputSchema: {
       text: z.string().optional(),
       city: z.string().optional(),
       country: z.string().optional(),
+      orientation: z.enum(["landscape", "portrait", "square"]).optional(),
+      min_width: z.number().int().min(0).optional(),
+      min_height: z.number().int().min(0).optional(),
       date_from: z.iso.date().optional(),
       date_to: z.iso.date().optional(),
       tags_any: z.array(z.string()).optional(),
@@ -56,7 +60,7 @@ function getServer() {
         "city",
         "filename"
       ]).default("newest"),
-      view: z.enum(["summary", "full"]).default("summary")
+      view: z.enum(["summary", "blog", "full"]).default("summary")
     }
   }, async (args) => {
     try {
@@ -166,13 +170,55 @@ function getServer() {
     }
   });
 
-  server.registerTool("get_destinations", {
-    description: "List all travel destinations (city/country) with counts of photos, videos, and journal entries and the date range of content at each. Use to see where and when the family has traveled.",
-    inputSchema: {}
-  }, async () => {
+  server.registerTool("get_trip", {
+    description: "Get a single chronological trip timeline across journal entries, photos, and videos for a date window and optional location filter. Preferred starting point for writing about a specific trip.",
+    inputSchema: {
+      date_from: z.iso.date(),
+      date_to: z.iso.date(),
+      city: z.string().optional(),
+      country: z.string().optional(),
+      limit_per_type: z.number().int().min(1).max(100).default(25)
+    }
+  }, async (args) => {
     try {
       const db = getDb();
-      const result = queryDestinations(db);
+      const result = getTrip(db, args);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: error.message })
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+
+  server.registerTool("get_destinations", {
+    description: "List travel destinations with photo, video, and journal counts plus content date ranges. Supports filtering and limiting for narrow checks. Example: country=\"Australia\" answers whether the catalog has Australia content in one small call.",
+    inputSchema: {
+      country: z.string().optional(),
+      min_photos: z.number().int().min(0).optional(),
+      min_videos: z.number().int().min(0).optional(),
+      min_total: z.number().int().min(0).optional(),
+      sort: z.enum(["photos", "videos", "date_last", "city"]).optional(),
+      limit: z.number().int().min(0).default(0)
+    }
+  }, async (args) => {
+    try {
+      const db = getDb();
+      const result = queryDestinations(db, args);
 
       return {
         content: [
