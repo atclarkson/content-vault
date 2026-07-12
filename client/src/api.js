@@ -72,10 +72,6 @@ export async function queryJournalEntries(query = {}) {
   return jsonRequest("/api/journal-entries/query", "POST", query);
 }
 
-export async function searchSemantic(query = {}) {
-  return jsonRequest("/api/search/semantic", "POST", query);
-}
-
 export async function getPhoto(id) {
   return request(`/api/photos/${id}`);
 }

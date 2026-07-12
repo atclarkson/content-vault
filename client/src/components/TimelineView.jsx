@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  deletePhoto,
   getDestinations,
   getJournalEntries,
   getPhotos,
-  searchSemantic,
   getVideos,
   updatePhoto,
   uploadPhotos
 } from "../api";
 import AnalyzeQueueModal from "./AnalyzeQueueModal";
-import BulkActionBar from "./BulkActionBar";
+import BulkActionBar, {
+  AddPersonAction,
+  AddTagAction,
+  AssignDestinationAction,
+  RemovePersonAction,
+  RemoveTagAction
+} from "./BulkActionBar";
 import PhotoEditor from "./PhotoEditor";
 import PhotoFilters from "./PhotoFilters";
 import PhotoGrid from "./PhotoGrid";
@@ -21,12 +27,6 @@ const CONTENT_TYPE_OPTIONS = [
   { id: "videos", label: "Videos", disabled: false },
   { id: "journal", label: "Journal", disabled: false }
 ];
-
-const CONTENT_TYPE_TO_SEMANTIC_TYPE = {
-  photos: "photo",
-  videos: "video",
-  journal: "journal"
-};
 
 const TIMELINE_SECTION_STYLE = {
   contentVisibility: "auto",
@@ -148,28 +148,6 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
-function formatSemanticResultType(type) {
-  if (type === "photo") {
-    return "Photo";
-  }
-
-  if (type === "video") {
-    return "Video";
-  }
-
-  return "Journal";
-}
-
-function formatSemanticScore(score) {
-  const numericScore = Number(score);
-
-  if (!Number.isFinite(numericScore)) {
-    return null;
-  }
-
-  return `${Math.round(numericScore * 100)}%`;
-}
-
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 1023.98px)").matches
@@ -208,22 +186,27 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [analyzeQueueOrder, setAnalyzeQueueOrder] = useState("newest");
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [activeFilterCount, setActiveFilterCount] = useState(0);
-  const [semanticQueryInput, setSemanticQueryInput] = useState("");
-  const [activeSemanticQuery, setActiveSemanticQuery] = useState("");
-  const [semanticResults, setSemanticResults] = useState(null);
-  const [isSemanticLoading, setIsSemanticLoading] = useState(false);
-  const [semanticError, setSemanticError] = useState("");
+  const [activeBulkSheet, setActiveBulkSheet] = useState(null);
+  const [bulkSheetOffsetY, setBulkSheetOffsetY] = useState(0);
+  const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [destinationActionKey, setDestinationActionKey] = useState(0);
   const contentScrollRef = useRef(null);
+  const selectionAnchorRef = useRef(null);
   const filterSheetStartYRef = useRef(0);
   const filterSheetCanDragRef = useRef(false);
   const filterSheetScrollRef = useRef(null);
   const [filterSheetOffsetY, setFilterSheetOffsetY] = useState(0);
+  const bulkSheetStartYRef = useRef(0);
+  const bulkSheetCanDragRef = useRef(false);
+  const bulkSheetScrollRef = useRef(null);
 
   function syncLoadedPhotos(nextPhotos, { resetSelection = false } = {}) {
     setPhotos(nextPhotos);
 
     if (resetSelection) {
       setSelectedIds(new Set());
+      selectionAnchorRef.current = null;
     } else {
       setSelectedIds((currentSelectedIds) => new Set(
         [...currentSelectedIds].filter((photoId) => nextPhotos.some((photo) => photo.id === photoId))
@@ -431,7 +414,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
     ], "country")
   }), [photos, videos]);
   const isBulkEditing = selectedIds.size > 1;
-  const hasActiveEditorContent = isBulkEditing || Boolean(editingVideo) || Boolean(editingPhoto);
+  const isDesktopBulkEditing = !isMobile && isBulkEditing;
+  const hasMobileOverlayEditor = Boolean(editingVideo) || Boolean(editingPhoto);
   const hasActiveFilters = Object.entries(filters).some(([, value]) => {
     if (value === undefined || value === null) {
       return false;
@@ -456,47 +440,14 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setFilters({});
   }
 
-  async function handleSemanticSearchSubmit(event) {
-    event.preventDefault();
-
-    const query = semanticQueryInput.trim();
-
-    if (!query) {
-      setActiveSemanticQuery("");
-      setSemanticResults(null);
-      setSemanticError("");
-      return;
+  useEffect(() => {
+    if (selectedIds.size === 0) {
+      setActiveBulkSheet(null);
+      setBulkSheetOffsetY(0);
+      setDeleteError("");
+      selectionAnchorRef.current = null;
     }
-
-    setIsSemanticLoading(true);
-    setSemanticError("");
-
-    try {
-      const response = await searchSemantic({
-        query,
-        limit: 15,
-        ...(CONTENT_TYPE_TO_SEMANTIC_TYPE[contentType]
-          ? { content_types: [CONTENT_TYPE_TO_SEMANTIC_TYPE[contentType]] }
-          : {})
-      });
-
-      setActiveSemanticQuery(query);
-      setSemanticResults(response?.data || null);
-    } catch (searchError) {
-      setSemanticError(searchError.message || "Failed to run AI search");
-      setActiveSemanticQuery(query);
-      setSemanticResults(null);
-    } finally {
-      setIsSemanticLoading(false);
-    }
-  }
-
-  function handleClearSemanticSearch() {
-    setSemanticQueryInput("");
-    setActiveSemanticQuery("");
-    setSemanticResults(null);
-    setSemanticError("");
-  }
+  }, [selectedIds.size]);
 
   function handleSavedPhoto(updatedPhoto) {
     setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
@@ -548,6 +499,28 @@ export default function TimelineView({ people, tags, tagGroups }) {
       await refreshPhotosPreservingView();
     } catch (refreshError) {
       setError(refreshError.message || "Failed to refresh photos");
+    }
+  }
+
+  async function handleDeleteSelection() {
+    const ids = [...selectedIds];
+
+    if (ids.length === 0 || isDeleteSubmitting) {
+      return;
+    }
+
+    setIsDeleteSubmitting(true);
+    setDeleteError("");
+
+    try {
+      await Promise.all(ids.map((photoId) => deletePhoto(photoId)));
+      setSelectedIds(new Set());
+      setActiveBulkSheet(null);
+      await handleBulkAction();
+    } catch (deleteActionError) {
+      setDeleteError(deleteActionError.message || "Failed to delete photos");
+    } finally {
+      setIsDeleteSubmitting(false);
     }
   }
 
@@ -641,6 +614,23 @@ export default function TimelineView({ people, tags, tagGroups }) {
     return null;
   }, [analyzeQueuePhotos, editingPhoto?.id]);
 
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key !== "Escape" || selectedIds.size === 0) {
+        return;
+      }
+
+      setSelectedIds(new Set());
+      selectionAnchorRef.current = null;
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedIds.size]);
+
   function navigateEditingPhoto(direction) {
     if (!editingPhoto || visiblePhotosInOrder.length === 0) {
       return;
@@ -665,6 +655,13 @@ export default function TimelineView({ people, tags, tagGroups }) {
   function closeFilterPanel() {
     setIsFilterPanelOpen(false);
     setFilterSheetOffsetY(0);
+  }
+
+  function closeBulkSheet() {
+    setActiveBulkSheet(null);
+    setBulkSheetOffsetY(0);
+    setDeleteError("");
+    setDestinationActionKey((currentValue) => currentValue + 1);
   }
 
   function handleFilterSheetTouchStart(event) {
@@ -706,23 +703,126 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setFilterSheetOffsetY(0);
   }
 
-  function openSemanticResult(result) {
-    if (!result?.record) {
+  function handleBulkSheetTouchStart(event) {
+    if (!isMobile || !activeBulkSheet) {
       return;
     }
 
-    if (result.type === "photo") {
-      const fullPhoto = photos.find((photo) => photo.id === result.record.id) || result.record;
-      setEditingVideo(null);
-      setEditingPhoto(fullPhoto);
+    bulkSheetCanDragRef.current = (bulkSheetScrollRef.current?.scrollTop || 0) <= 0;
+    bulkSheetStartYRef.current = event.touches[0]?.clientY || 0;
+  }
+
+  function handleBulkSheetTouchMove(event) {
+    if (!isMobile || !activeBulkSheet) {
       return;
     }
 
-    if (result.type === "video") {
-      const fullVideo = videos.find((video) => video.id === result.record.id) || result.record;
-      setEditingPhoto(null);
-      setEditingVideo(fullVideo);
+    const currentY = event.touches[0]?.clientY || 0;
+    const nextOffset = Math.max(0, currentY - bulkSheetStartYRef.current);
+
+    if (!bulkSheetCanDragRef.current || nextOffset === 0) {
+      return;
     }
+
+    setBulkSheetOffsetY(nextOffset);
+  }
+
+  function handleBulkSheetTouchEnd() {
+    if (!isMobile || !activeBulkSheet) {
+      return;
+    }
+
+    bulkSheetCanDragRef.current = false;
+
+    if (bulkSheetOffsetY > 80) {
+      closeBulkSheet();
+      return;
+    }
+
+    setBulkSheetOffsetY(0);
+  }
+
+  function renderBulkSheetBody() {
+    if (activeBulkSheet === "destination") {
+      return (
+        <AssignDestinationAction
+          key={destinationActionKey}
+          selectedIds={selectedIds}
+          onDone={handleBulkAction}
+          onClearSelection={() => setSelectedIds(new Set())}
+          onClose={closeBulkSheet}
+          inline
+          stickyConfirm
+        />
+      );
+    }
+
+    if (activeBulkSheet === "delete") {
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-stone-600">
+            Delete {selectedIds.size} photo{selectedIds.size === 1 ? "" : "s"}? They will be moved to trash and can be
+            restored.
+          </p>
+          {deleteError ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{deleteError}</div> : null}
+        </div>
+      );
+    }
+
+    if (activeBulkSheet === "people") {
+      return (
+        <div className="space-y-6">
+          <div>
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Add Person</p>
+            <AddPersonAction
+              selectedIds={selectedIds}
+              people={people}
+              onDone={handleBulkAction}
+              onClearSelection={() => setSelectedIds(new Set())}
+              inline
+            />
+          </div>
+          <div className="border-t border-stone-200 pt-5">
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Remove Person</p>
+            <RemovePersonAction
+              selectedIds={selectedIds}
+              people={people}
+              onDone={handleBulkAction}
+              onClearSelection={() => setSelectedIds(new Set())}
+              inline
+            />
+          </div>
+        </div>
+      );
+    }
+
+    if (activeBulkSheet === "tags") {
+      return (
+        <div className="space-y-6">
+          <div>
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Add Tag</p>
+            <AddTagAction
+              selectedIds={selectedIds}
+              onDone={handleBulkAction}
+              onClearSelection={() => setSelectedIds(new Set())}
+              inline
+            />
+          </div>
+          <div className="border-t border-stone-200 pt-5">
+            <p className="mb-3 text-xs uppercase tracking-[0.24em] text-stone-500">Remove Tag</p>
+            <RemoveTagAction
+              selectedIds={selectedIds}
+              allTags={tags}
+              onDone={handleBulkAction}
+              onClearSelection={() => setSelectedIds(new Set())}
+              inline
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return null;
   }
 
   return (
@@ -770,28 +870,6 @@ export default function TimelineView({ people, tags, tagGroups }) {
                 </span>
               </label>
 
-              <form onSubmit={handleSemanticSearchSubmit} className="flex items-center gap-3">
-                <label className="relative block w-[360px]">
-                  <input
-                    type="search"
-                    value={semanticQueryInput}
-                    onChange={(event) => setSemanticQueryInput(event.target.value)}
-                    placeholder="AI search across photos, videos, journals"
-                    className="field pl-11"
-                  />
-                  <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-stone-500">
-                    <i className="ti ti-sparkles text-base" aria-hidden="true" />
-                  </span>
-                </label>
-                <button type="submit" className="ai-button">
-                  Search
-                </button>
-                {(activeSemanticQuery || semanticQueryInput) ? (
-                  <button type="button" onClick={handleClearSemanticSearch} className="btn-secondary">
-                    Clear
-                  </button>
-                ) : null}
-              </form>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -830,24 +908,6 @@ export default function TimelineView({ people, tags, tagGroups }) {
           </div>
 
           <div className="space-y-3 lg:hidden">
-            <form onSubmit={handleSemanticSearchSubmit} className="flex items-center gap-3">
-              <label className="relative block min-w-0 flex-1">
-                <input
-                  type="search"
-                  value={semanticQueryInput}
-                  onChange={(event) => setSemanticQueryInput(event.target.value)}
-                  placeholder="AI search"
-                  className="field pl-11"
-                />
-                <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-stone-500">
-                  <i className="ti ti-sparkles text-base" aria-hidden="true" />
-                </span>
-              </label>
-              <button type="submit" className="ai-button px-4">
-                Go
-              </button>
-            </form>
-
             <div className="inline-flex w-full overflow-hidden rounded-xl border border-stone-300 bg-white">
               {CONTENT_TYPE_OPTIONS.map((option) => (
                 <button
@@ -983,12 +1043,6 @@ export default function TimelineView({ people, tags, tagGroups }) {
           </div>
         ) : null}
 
-        {semanticError ? (
-          <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {semanticError}
-          </div>
-        ) : null}
-
         {isLoading ? (
           <section className="panel flex min-h-[360px] items-center justify-center p-8">
             <div className="text-center">
@@ -996,120 +1050,6 @@ export default function TimelineView({ people, tags, tagGroups }) {
               <p className="mt-2 text-sm text-stone-500">Fetching destinations, photos, and videos.</p>
               <p className="mt-1 text-sm text-stone-500">Loading journal entries too.</p>
             </div>
-          </section>
-        ) : activeSemanticQuery ? (
-          <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI Search</p>
-                <h2 className="mt-2 text-2xl font-semibold text-stone-900">
-                  {activeSemanticQuery}
-                </h2>
-                <p className="mt-2 text-sm text-stone-500">
-                  Natural-language results across photos, videos, and journal entries.
-                </p>
-              </div>
-
-              <button type="button" onClick={handleClearSemanticSearch} className="btn-secondary">
-                Clear Search
-              </button>
-            </div>
-
-            {isSemanticLoading ? (
-              <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
-                Running AI search...
-              </div>
-            ) : !semanticResults || semanticResults.items.length === 0 ? (
-              <div className="flex min-h-[240px] items-center justify-center border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-sm text-stone-500">
-                No AI search results found for this query.
-              </div>
-            ) : (
-              <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-                <div className="mb-4 flex flex-wrap gap-3 text-xs uppercase tracking-[0.22em] text-stone-500">
-                  <span>{semanticResults.total_hits} hits</span>
-                  <span>{semanticResults.photos.length} photos</span>
-                  <span>{semanticResults.videos.length} videos</span>
-                  <span>{semanticResults.journals.length} journals</span>
-                </div>
-
-                <div className="space-y-4">
-                  {semanticResults.items.map((result, index) => {
-                    const scoreLabel = formatSemanticScore(result.score);
-                    const isClickable = result.type === "photo" || result.type === "video";
-
-                    return (
-                      <article
-                        key={`${result.type}-${result.record.id}-${index}`}
-                        className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.22em] text-stone-500">
-                              {formatSemanticResultType(result.type)}
-                            </p>
-                            <h3 className="mt-2 text-xl font-semibold text-stone-900">
-                              {result.record.title || result.record.original_filename || "Untitled"}
-                            </h3>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {scoreLabel ? (
-                              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
-                                Match {scoreLabel}
-                              </span>
-                            ) : null}
-                            {isClickable ? (
-                              <button
-                                type="button"
-                                onClick={() => openSemanticResult(result)}
-                                className="btn-secondary"
-                              >
-                                Open
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-3 text-sm text-stone-600 md:grid-cols-3">
-                          <p>
-                            <span className="font-medium text-stone-900">Date:</span>{" "}
-                            {result.record.captured_at || result.record.published_at || result.record.date || "Unknown"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-stone-900">City:</span>{" "}
-                            {result.record.city || "Unknown"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-stone-900">Country:</span>{" "}
-                            {result.record.country || "Unknown"}
-                          </p>
-                        </div>
-
-                        {result.record.people?.length > 0 ? (
-                          <p className="mt-4 text-sm text-stone-600">
-                            <span className="font-medium text-stone-900">People:</span>{" "}
-                            {result.record.people.map((person) => person.name).join(", ")}
-                          </p>
-                        ) : null}
-
-                        {result.record.tags?.length > 0 ? (
-                          <p className="mt-2 text-sm text-stone-600">
-                            <span className="font-medium text-stone-900">Tags:</span>{" "}
-                            {result.record.tags.join(", ")}
-                          </p>
-                        ) : null}
-
-                        {result.excerpt ? (
-                          <p className="mt-4 rounded-2xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
-                            {result.excerpt}
-                          </p>
-                        ) : null}
-                      </article>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </section>
         ) : hasActiveFilters && !showNoContentDestinations ? (
           <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
@@ -1142,6 +1082,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   }}
                   selectedIds={selectedIds}
                   onSelectionChange={setSelectedIds}
+                  selectionAnchorRef={selectionAnchorRef}
+                  visiblePhotoIds={visiblePhotosInOrder.map((photo) => photo.id)}
                   embedded
                   showSortControl={false}
                 />
@@ -1193,6 +1135,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
                           }}
                           selectedIds={selectedIds}
                           onSelectionChange={setSelectedIds}
+                          selectionAnchorRef={selectionAnchorRef}
+                          visiblePhotoIds={visiblePhotosInOrder.map((photo) => photo.id)}
                           embedded
                           showSortControl={false}
                         />
@@ -1293,6 +1237,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
                         }}
                         selectedIds={selectedIds}
                         onSelectionChange={setSelectedIds}
+                        selectionAnchorRef={selectionAnchorRef}
+                        visiblePhotoIds={visiblePhotosInOrder.map((photo) => photo.id)}
                         embedded
                         showSortControl={false}
                       />
@@ -1351,21 +1297,138 @@ export default function TimelineView({ people, tags, tagGroups }) {
         )}
       </div>
 
+      {selectedIds.size >= 1 ? (
+        <div className="fixed inset-x-0 bottom-0 z-[70] border-t border-stone-300 bg-stone-50/95 px-3 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur xl:hidden">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 px-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-stone-500">Selected</p>
+              <p className="text-sm font-medium text-stone-900">
+                {selectedIds.size} selected
+              </p>
+            </div>
+
+            {[
+              { id: "destination", label: "Destination", icon: "ti ti-map-pin" },
+              { id: "delete", label: "Delete", icon: "ti ti-trash" },
+              { id: "people", label: "People", icon: "ti ti-user" },
+              { id: "tags", label: "Tags", icon: "ti ti-tag" }
+            ].map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                onClick={() => {
+                  setDeleteError("");
+                  setActiveBulkSheet(action.id);
+                }}
+                className="flex min-h-[56px] flex-1 flex-col items-center justify-center rounded-2xl px-2 py-2 text-center text-[11px] font-medium text-stone-700 transition hover:bg-white hover:text-stone-900"
+              >
+                <i className={`${action.icon} text-base`} aria-hidden="true" />
+                <span className="mt-1">{action.label}</span>
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedIds(new Set());
+                selectionAnchorRef.current = null;
+              }}
+              className="flex min-h-[56px] w-14 shrink-0 flex-col items-center justify-center rounded-2xl px-2 py-2 text-center text-[11px] font-medium text-stone-700 transition hover:bg-white hover:text-stone-900"
+            >
+              <i className="ti ti-x text-base" aria-hidden="true" />
+              <span className="mt-1">Clear</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {activeBulkSheet ? (
+        <>
+          <div
+            className="fixed inset-0 z-[75] bg-stone-950/35 transition xl:hidden"
+            onClick={closeBulkSheet}
+          />
+          <div
+            className="fixed inset-x-0 bottom-0 z-[80] rounded-t-[1.75rem] border border-stone-300 bg-white xl:hidden"
+            onTouchStart={handleBulkSheetTouchStart}
+            onTouchMove={handleBulkSheetTouchMove}
+            onTouchEnd={handleBulkSheetTouchEnd}
+            style={{
+              transform: `translateY(${bulkSheetOffsetY}px)`,
+              transition: bulkSheetOffsetY > 0 ? "none" : "transform 180ms ease-out"
+            }}
+          >
+            <div ref={bulkSheetScrollRef} className="max-h-[85vh] overflow-y-auto">
+              <div className="sticky top-0 z-10 border-b border-stone-200 bg-white px-5 pb-4 pt-3">
+                <div className="mx-auto h-1.5 w-12 rounded-full bg-stone-300" />
+                <div className="mt-3 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Bulk Action</p>
+                    <h3 className="mt-1 text-lg font-semibold text-stone-900">
+                      {activeBulkSheet === "destination"
+                        ? "Assign Destination"
+                        : activeBulkSheet === "delete"
+                          ? "Delete"
+                          : activeBulkSheet === "people"
+                            ? "People"
+                            : "Tags"}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeBulkSheet}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-700"
+                    aria-label="Close bulk action"
+                  >
+                    <i className="ti ti-x text-base" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-5 px-5 py-5">
+                {renderBulkSheetBody()}
+              </div>
+
+              {activeBulkSheet === "delete" ? (
+                <div className="sticky bottom-0 border-t border-stone-200 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4">
+                  <div className="flex gap-3">
+                    <button type="button" onClick={closeBulkSheet} className="btn-secondary flex-1">
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelection}
+                      disabled={isDeleteSubmitting}
+                      className="btn-primary flex-1"
+                    >
+                      {isDeleteSubmitting ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : null}
+
       <div
         className={
-          hasActiveEditorContent
+          hasMobileOverlayEditor
             ? "fixed inset-0 z-[60] flex min-h-0 flex-col bg-white pt-[env(safe-area-inset-top)] xl:static xl:z-auto xl:w-[560px] xl:shrink-0 xl:flex xl:pt-0"
             : "hidden min-h-0 xl:flex xl:w-[560px] xl:shrink-0"
         }
       >
-        {isBulkEditing ? (
+        {isDesktopBulkEditing ? (
           <BulkActionBar
             selectedIds={selectedIds}
             people={people}
             allTags={tags}
             locationOptions={locationOptions}
             onAction={handleBulkAction}
-            onClear={() => setSelectedIds(new Set())}
+            onClear={() => {
+              setSelectedIds(new Set());
+              selectionAnchorRef.current = null;
+            }}
           />
         ) : editingVideo ? (
           <VideoEditor

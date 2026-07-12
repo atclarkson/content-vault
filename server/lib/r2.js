@@ -57,25 +57,16 @@ function buildPublicUrl(baseUrl, key) {
   return `${normalizedBaseUrl}/${normalizedKey}`;
 }
 
-async function uploadFile(key, buffer, contentType, options = {}) {
+async function uploadFile(key, buffer, contentType) {
   const config = getR2Config();
   const client = getR2Client();
-  const metadata =
-    options && typeof options.metadata === "object" && !Array.isArray(options.metadata)
-      ? Object.fromEntries(
-          Object.entries(options.metadata)
-            .filter(([, value]) => value !== undefined && value !== null && value !== "")
-            .map(([fieldName, value]) => [fieldName, String(value)])
-        )
-      : undefined;
 
   await client.send(
     new PutObjectCommand({
       Bucket: config.bucketName,
       Key: key,
       Body: buffer,
-      ContentType: contentType,
-      Metadata: metadata
+      ContentType: contentType
     })
   );
 

@@ -52,7 +52,6 @@ function normalizeJournalQueryOptions(options) {
 
   return {
     filters: {
-      ids: normalizeIdArray(filtersSource.ids),
       text: normalizeOptionalString(filtersSource.text),
       city: normalizeOptionalString(filtersSource.city),
       country: normalizeOptionalString(filtersSource.country),
@@ -72,11 +71,6 @@ function normalizeJournalQueryOptions(options) {
 function buildJournalQueryFilters(filters) {
   const conditions = [];
   const params = [];
-
-  if (filters.ids.length > 0) {
-    conditions.push(`journal_entries.id IN (${createPlaceholders(filters.ids.length)})`);
-    params.push(...filters.ids);
-  }
 
   if (filters.text) {
     const searchPattern = `%${filters.text.toLowerCase()}%`;
@@ -178,25 +172,3 @@ function createExcerpt(text, maxLength) {
 module.exports = {
   queryJournals
 };
-
-function createPlaceholders(count) {
-  return new Array(count).fill("?").join(", ");
-}
-
-function normalizeIdArray(values) {
-  if (values === undefined || values === null) {
-    return [];
-  }
-
-  if (!Array.isArray(values)) {
-    throw new Error("ids must be an array of positive integers");
-  }
-
-  const ids = values.map((value) => Number(value));
-
-  if (ids.some((value) => !Number.isInteger(value) || value <= 0)) {
-    throw new Error("ids must be an array of positive integers");
-  }
-
-  return [...new Set(ids)];
-}

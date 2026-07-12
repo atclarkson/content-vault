@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
-import { bulkUpdate, createPerson, getPeople } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { bulkUpdate, createPerson, getDestinations, getPeople } from "../api";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 
 const PRIMARY_PEOPLE = ["Adam", "Lindsay", "Lily", "Cora", "Harper"];
+let cachedDestinations = null;
+let destinationsRequest = null;
 
 function ActionMenu({ title, children }) {
   return (
@@ -13,29 +15,104 @@ function ActionMenu({ title, children }) {
   );
 }
 
-export default function BulkActionBar({ selectedIds, people, allTags, locationOptions, onAction, onClear }) {
-  const [activeAction, setActiveAction] = useState("");
-  const [availablePeople, setAvailablePeople] = useState(people);
-  const [tagName, setTagName] = useState("");
-  const [selectedTagNames, setSelectedTagNames] = useState([]);
-  const [selectedPeopleIds, setSelectedPeopleIds] = useState([]);
-  const [newPersonName, setNewPersonName] = useState("");
-  const [location, setLocation] = useState({
-    neighborhood: "",
-    city: "",
-    region: "",
-    country: ""
+function normalizeIds(selectedIds) {
+  return Array.from(selectedIds || []);
+}
+
+function formatDestinationRange(dateStart, dateEnd) {
+  if (!dateStart || !dateEnd) {
+    return "";
+  }
+
+  const start = new Date(dateStart);
+  const end = new Date(dateEnd);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return "";
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
   });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState("");
+
+  return `${formatter.format(start)} – ${formatter.format(end)}`;
+}
+
+function getDestinationLabel(destination) {
+  return `${destination.city}, ${destination.country}`;
+}
+
+function buildDestinationUpdates(destination) {
+  const updates = {};
+
+  if (destination?.city?.trim()) {
+    updates.city = destination.city.trim();
+  }
+
+  if (destination?.country?.trim()) {
+    updates.country = destination.country.trim();
+  }
+
+  if (typeof destination?.region === "string" && destination.region.trim()) {
+    updates.region = destination.region.trim();
+  }
+
+  return updates;
+}
+
+function getDestinationTimestamp(destination) {
+  const candidates = [destination?.date_start, destination?.date_end, destination?.created_at];
+
+  for (const value of candidates) {
+    if (!value) {
+      continue;
+    }
+
+    const timestamp = new Date(value).getTime();
+
+    if (!Number.isNaN(timestamp)) {
+      return timestamp;
+    }
+  }
+
+  return 0;
+}
+
+function sortDestinations(destinations) {
+  const groupedDestinations = new Map();
+
+  destinations.forEach((destination, index) => {
+    const key = `${destination.city}__${destination.country}`;
+    const group = groupedDestinations.get(key) || [];
+    group.push({ destination, index });
+    groupedDestinations.set(key, group);
+  });
+
+  return [...groupedDestinations.values()]
+    .map((group) => group.sort((left, right) => (
+      getDestinationTimestamp(right.destination) - getDestinationTimestamp(left.destination)
+      || left.index - right.index
+    )))
+    .sort((leftGroup, rightGroup) => (
+      getDestinationTimestamp(rightGroup[0].destination) - getDestinationTimestamp(leftGroup[0].destination)
+      || leftGroup[0].index - rightGroup[0].index
+    ))
+    .flat()
+    .map((entry) => entry.destination);
+}
+
+function useAvailablePeople(people, shouldRefresh = false) {
+  const [availablePeople, setAvailablePeople] = useState(people);
 
   useEffect(() => {
     setAvailablePeople(people);
   }, [people]);
 
   useEffect(() => {
-    if (activeAction !== "add-person" && activeAction !== "remove-person") {
-      return;
+    if (!shouldRefresh) {
+      return undefined;
     }
 
     let isActive = true;
@@ -59,27 +136,136 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
     return () => {
       isActive = false;
     };
-  }, [activeAction]);
+  }, [shouldRefresh]);
 
-  if (selectedIds.size === 0) {
-    return null;
-  }
+  return [availablePeople, setAvailablePeople];
+}
 
-  const ids = Array.from(selectedIds);
+function PersonSelectionSection({
+  selectedPeopleIds,
+  availablePeople,
+  newPersonName,
+  setNewPersonName,
+  togglePerson,
+  isSubmitting,
+  addExistingPersonByName,
+  handleCreatePerson,
+  createButtonLabel
+}) {
+  const primaryPeople = useMemo(
+    () => PRIMARY_PEOPLE
+      .map((name) => availablePeople.find((person) => person.name === name))
+      .filter(Boolean),
+    [availablePeople]
+  );
+  const otherPeople = useMemo(
+    () => availablePeople.filter((person) => !PRIMARY_PEOPLE.includes(person.name)),
+    [availablePeople]
+  );
 
-  async function submitBulkAction(updates) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {primaryPeople.map((person) => {
+          const isSelected = selectedPeopleIds.includes(person.id);
+
+          return (
+            <button
+              key={person.id}
+              type="button"
+              onClick={() => togglePerson(person.id)}
+              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                isSelected
+                  ? "border-amber-400 bg-amber-100 text-amber-900"
+                  : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
+              }`}
+            >
+              {person.name}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPeopleIds.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selectedPeopleIds
+            .map((id) => availablePeople.find((person) => person.id === id))
+            .filter(Boolean)
+            .filter((person) => !PRIMARY_PEOPLE.includes(person.name))
+            .map((person) => (
+              <button
+                key={person.id}
+                type="button"
+                onClick={() => togglePerson(person.id)}
+                className="rounded-full border border-stone-300 bg-stone-100 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-200"
+              >
+                {person.name} ×
+              </button>
+            ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-3">
+        <input
+          type="text"
+          value={newPersonName}
+          onChange={(event) => setNewPersonName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+
+              if (!addExistingPersonByName(newPersonName)) {
+                handleCreatePerson();
+              }
+            }
+          }}
+          className="field min-w-[240px] flex-1"
+          placeholder="Add another person..."
+          list={`bulk-person-suggestions-${createButtonLabel.replace(/\s+/g, "-").toLowerCase()}`}
+        />
+        <datalist id={`bulk-person-suggestions-${createButtonLabel.replace(/\s+/g, "-").toLowerCase()}`}>
+          {otherPeople.map((person) => (
+            <option key={person.id} value={person.name} />
+          ))}
+        </datalist>
+        <button
+          type="button"
+          onClick={() => {
+            if (!addExistingPersonByName(newPersonName)) {
+              handleCreatePerson();
+            }
+          }}
+          disabled={isSubmitting || !newPersonName.trim()}
+          className="btn-secondary"
+        >
+          {createButtonLabel}
+        </button>
+      </div>
+    </>
+  );
+}
+
+export function AddTagAction({ selectedIds, onDone, onClearSelection, inline = false }) {
+  const [tagName, setTagName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const ids = normalizeIds(selectedIds);
+
+  async function handleSubmit() {
+    const trimmedTag = tagName.trim();
+
+    if (!trimmedTag || isSubmitting) {
+      return;
+    }
+
     setIsSubmitting(true);
     setError("");
 
     try {
-      await bulkUpdate(ids, updates);
-      onAction(ids);
-      setActiveAction("");
+      await bulkUpdate(ids, { add_tags: [trimmedTag] });
       setTagName("");
-      setSelectedTagNames([]);
-      setSelectedPeopleIds([]);
-      setNewPersonName("");
-      setLocation({ neighborhood: "", city: "", region: "", country: "" });
+      onDone?.(ids);
+      onClearSelection?.();
     } catch (actionError) {
       setError(actionError.message || "Bulk update failed");
     } finally {
@@ -87,13 +273,115 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
     }
   }
 
-  function toggleTag(tagNameValue) {
+  const content = (
+    <>
+      <div className="flex flex-wrap gap-3">
+        <input
+          type="text"
+          value={tagName}
+          onChange={(event) => setTagName(event.target.value)}
+          className="field min-w-[240px] flex-1"
+          placeholder="Tag name"
+        />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || !tagName.trim()}
+          className="btn-primary"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Add Tag">{content}</ActionMenu>;
+}
+
+export function RemoveTagAction({ selectedIds, allTags, onDone, onClearSelection, inline = false }) {
+  const [selectedTagNames, setSelectedTagNames] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const ids = normalizeIds(selectedIds);
+
+  function toggleTag(tagName) {
     setSelectedTagNames((currentTags) => (
-      currentTags.includes(tagNameValue)
-        ? currentTags.filter((currentTag) => currentTag !== tagNameValue)
-        : [...currentTags, tagNameValue]
+      currentTags.includes(tagName)
+        ? currentTags.filter((currentTag) => currentTag !== tagName)
+        : [...currentTags, tagName]
     ));
   }
+
+  async function handleSubmit() {
+    if (selectedTagNames.length === 0 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      await bulkUpdate(ids, { remove_tags: selectedTagNames });
+      setSelectedTagNames([]);
+      onDone?.(ids);
+      onClearSelection?.();
+    } catch (actionError) {
+      setError(actionError.message || "Bulk update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const content = (
+    <>
+      <div className="max-h-48 space-y-2 overflow-auto border border-stone-200 bg-stone-50 p-3">
+        {allTags.map((tag) => (
+          <label key={tag.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
+            <input
+              type="checkbox"
+              checked={selectedTagNames.includes(tag.name)}
+              onChange={() => toggleTag(tag.name)}
+              className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+            />
+            <span className="text-sm text-stone-700">{tag.name}</span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || selectedTagNames.length === 0}
+          className="btn-primary"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Remove Tag">{content}</ActionMenu>;
+}
+
+export function AddPersonAction({ selectedIds, people, onDone, onClearSelection, inline = false }) {
+  const [availablePeople, setAvailablePeople] = useAvailablePeople(people, true);
+  const [selectedPeopleIds, setSelectedPeopleIds] = useState([]);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const ids = normalizeIds(selectedIds);
 
   function togglePerson(personId) {
     setSelectedPeopleIds((currentIds) => (
@@ -103,31 +391,24 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
     ));
   }
 
-  const primaryPeople = PRIMARY_PEOPLE
-    .map((name) => availablePeople.find((person) => person.name === name))
-    .filter(Boolean);
-  const otherPeople = availablePeople.filter((person) => !PRIMARY_PEOPLE.includes(person.name));
+  function addExistingPersonByName(name) {
+    const trimmedName = name.trim();
 
-  function buildLocationUpdates() {
-    const updates = {};
-
-    if (location.neighborhood.trim()) {
-      updates.neighborhood = location.neighborhood.trim();
+    if (!trimmedName) {
+      return false;
     }
 
-    if (location.city.trim()) {
-      updates.city = location.city.trim();
+    const person = availablePeople.find((entry) => entry.name.toLowerCase() === trimmedName.toLowerCase());
+
+    if (!person) {
+      return false;
     }
 
-    if (location.region.trim()) {
-      updates.region = location.region.trim();
-    }
-
-    if (location.country.trim()) {
-      updates.country = location.country.trim();
-    }
-
-    return updates;
+    setSelectedPeopleIds((currentIds) => (
+      currentIds.includes(person.id) ? currentIds : [...currentIds, person.id]
+    ));
+    setNewPersonName("");
+    return true;
   }
 
   async function handleCreatePerson() {
@@ -164,6 +445,78 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
     }
   }
 
+  async function handleSubmit() {
+    if (selectedPeopleIds.length === 0 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      await bulkUpdate(ids, { add_people: selectedPeopleIds });
+      setSelectedPeopleIds([]);
+      setNewPersonName("");
+      onDone?.(ids);
+      onClearSelection?.();
+    } catch (actionError) {
+      setError(actionError.message || "Bulk update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const content = (
+    <>
+      <PersonSelectionSection
+        selectedPeopleIds={selectedPeopleIds}
+        availablePeople={availablePeople}
+        newPersonName={newPersonName}
+        setNewPersonName={setNewPersonName}
+        togglePerson={togglePerson}
+        isSubmitting={isSubmitting}
+        addExistingPersonByName={addExistingPersonByName}
+        handleCreatePerson={handleCreatePerson}
+        createButtonLabel="Add New Person"
+      />
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || selectedPeopleIds.length === 0}
+          className="btn-primary"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Add Person">{content}</ActionMenu>;
+}
+
+export function RemovePersonAction({ selectedIds, people, onDone, onClearSelection, inline = false }) {
+  const [availablePeople] = useAvailablePeople(people, true);
+  const [selectedPeopleIds, setSelectedPeopleIds] = useState([]);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const ids = normalizeIds(selectedIds);
+
+  function togglePerson(personId) {
+    setSelectedPeopleIds((currentIds) => (
+      currentIds.includes(personId)
+        ? currentIds.filter((currentId) => currentId !== personId)
+        : [...currentIds, personId]
+    ));
+  }
+
   function addExistingPersonByName(name) {
     const trimmedName = name.trim();
 
@@ -184,6 +537,406 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
     return true;
   }
 
+  async function handleSubmit() {
+    if (selectedPeopleIds.length === 0 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      await bulkUpdate(ids, { remove_people: selectedPeopleIds });
+      setSelectedPeopleIds([]);
+      setNewPersonName("");
+      onDone?.(ids);
+      onClearSelection?.();
+    } catch (actionError) {
+      setError(actionError.message || "Bulk update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const content = (
+    <>
+      <PersonSelectionSection
+        selectedPeopleIds={selectedPeopleIds}
+        availablePeople={availablePeople}
+        newPersonName={newPersonName}
+        setNewPersonName={setNewPersonName}
+        togglePerson={togglePerson}
+        isSubmitting={isSubmitting}
+        addExistingPersonByName={addExistingPersonByName}
+        handleCreatePerson={() => {}}
+        createButtonLabel="Add Existing"
+      />
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || selectedPeopleIds.length === 0}
+          className="btn-primary"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Remove Person">{content}</ActionMenu>;
+}
+
+export function SetLocationAction({ selectedIds, locationOptions, onDone, onClearSelection, inline = false }) {
+  const [location, setLocation] = useState({
+    neighborhood: "",
+    city: "",
+    region: "",
+    country: ""
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const ids = normalizeIds(selectedIds);
+
+  function buildLocationUpdates() {
+    const updates = {};
+
+    if (location.neighborhood.trim()) {
+      updates.neighborhood = location.neighborhood.trim();
+    }
+
+    if (location.city.trim()) {
+      updates.city = location.city.trim();
+    }
+
+    if (location.region.trim()) {
+      updates.region = location.region.trim();
+    }
+
+    if (location.country.trim()) {
+      updates.country = location.country.trim();
+    }
+
+    return updates;
+  }
+
+  async function handleSubmit() {
+    const updates = buildLocationUpdates();
+
+    if (Object.keys(updates).length === 0 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      await bulkUpdate(ids, updates);
+      setLocation({ neighborhood: "", city: "", region: "", country: "" });
+      onDone?.(ids);
+      onClearSelection?.();
+    } catch (actionError) {
+      setError(actionError.message || "Bulk update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const content = (
+    <>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <LocationAutocompleteInput
+          id="bulk-neighborhood"
+          value={location.neighborhood}
+          onChange={(value) => setLocation((current) => ({ ...current, neighborhood: value }))}
+          options={locationOptions?.neighborhoods || []}
+          placeholder="Neighborhood"
+        />
+        <LocationAutocompleteInput
+          id="bulk-city"
+          value={location.city}
+          onChange={(value) => setLocation((current) => ({ ...current, city: value }))}
+          options={locationOptions?.cities || []}
+          placeholder="City"
+        />
+        <LocationAutocompleteInput
+          id="bulk-region"
+          value={location.region}
+          onChange={(value) => setLocation((current) => ({ ...current, region: value }))}
+          options={locationOptions?.regions || []}
+          placeholder="Region"
+        />
+        <LocationAutocompleteInput
+          id="bulk-country"
+          value={location.country}
+          onChange={(value) => setLocation((current) => ({ ...current, country: value }))}
+          options={locationOptions?.countries || []}
+          placeholder="Country"
+        />
+      </div>
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || Object.keys(buildLocationUpdates()).length === 0}
+          className="btn-primary"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Set Location">{content}</ActionMenu>;
+}
+
+export function AssignDestinationAction({
+  selectedIds,
+  onDone,
+  onClearSelection,
+  onClose,
+  inline = false,
+  stickyConfirm = false
+}) {
+  const ids = normalizeIds(selectedIds);
+  const [destinations, setDestinations] = useState(() => cachedDestinations || []);
+  const [isLoading, setIsLoading] = useState(() => !cachedDestinations);
+  const [loadError, setLoadError] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [pendingDestination, setPendingDestination] = useState(null);
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadDestinations() {
+      if (cachedDestinations) {
+        setDestinations(cachedDestinations);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setLoadError("");
+
+      try {
+        if (!destinationsRequest) {
+          destinationsRequest = getDestinations()
+            .then((response) => {
+              const nextDestinations = sortDestinations(
+                (response?.data || []).filter((destination) => (
+                  destination?.city?.trim() && destination?.country?.trim()
+                ))
+              );
+              cachedDestinations = nextDestinations;
+              return nextDestinations;
+            })
+            .finally(() => {
+              destinationsRequest = null;
+            });
+        }
+
+        const nextDestinations = await destinationsRequest;
+
+        if (!isActive) {
+          return;
+        }
+
+        setDestinations(nextDestinations);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        cachedDestinations = null;
+        setLoadError(error.message || "Failed to load destinations");
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadDestinations();
+
+    return () => {
+      isActive = false;
+    };
+  }, [reloadNonce]);
+
+  const filteredDestinations = useMemo(() => {
+    const query = searchValue.trim().toLowerCase();
+
+    if (!query) {
+      return destinations;
+    }
+
+    return destinations.filter((destination) => {
+      const city = destination.city.toLowerCase();
+      const country = destination.country.toLowerCase();
+      const combined = `${city}, ${country}`;
+      return city.includes(query) || country.includes(query) || combined.includes(query);
+    });
+  }, [destinations, searchValue]);
+
+  async function handleApply() {
+    const updates = buildDestinationUpdates(pendingDestination);
+
+    if (!pendingDestination || Object.keys(updates).length < 2 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError("");
+
+    try {
+      await bulkUpdate(ids, updates);
+      setSearchValue("");
+      setPendingDestination(null);
+      onDone?.(ids);
+      onClearSelection?.();
+      onClose?.();
+    } catch (error) {
+      setSubmitError(error.message || "Bulk update failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleRetry() {
+    cachedDestinations = null;
+    destinationsRequest = null;
+    setDestinations([]);
+    setLoadError("");
+    setIsLoading(true);
+    setReloadNonce((currentValue) => currentValue + 1);
+  }
+
+  const confirmContent = pendingDestination ? (
+    <div
+      className={
+        stickyConfirm
+          ? "sticky bottom-0 -mx-5 border-t border-stone-200 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4"
+          : "rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4"
+      }
+    >
+      <p className="text-sm font-medium text-stone-900">
+        Assign {ids.length} photo{ids.length === 1 ? "" : "s"} to {getDestinationLabel(pendingDestination)}?
+      </p>
+      <div className="mt-3 flex gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setPendingDestination(null);
+            setSubmitError("");
+          }}
+          disabled={isSubmitting}
+          className="btn-secondary flex-1"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleApply}
+          disabled={isSubmitting}
+          className="btn-primary flex-1"
+        >
+          {isSubmitting ? "Applying..." : "Apply"}
+        </button>
+      </div>
+      {submitError ? <div className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{submitError}</div> : null}
+    </div>
+  ) : null;
+
+  const content = (
+    <div className="space-y-4">
+      <div>
+        <input
+          type="text"
+          value={searchValue}
+          onChange={(event) => setSearchValue(event.target.value)}
+          className="field w-full"
+          placeholder="Search destinations"
+        />
+      </div>
+
+      {loadError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+          <p>{loadError}</p>
+          <button type="button" onClick={handleRetry} className="btn-secondary mt-3">
+            Retry
+          </button>
+        </div>
+      ) : isLoading ? (
+        <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm text-stone-600">
+          Loading destinations...
+        </div>
+      ) : filteredDestinations.length === 0 ? (
+        <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm text-stone-600">
+          {destinations.length === 0 ? "No destinations found." : "No destinations match that search."}
+        </div>
+      ) : (
+        <div className="max-h-72 overflow-y-auto rounded-2xl border border-stone-200 bg-white">
+          {filteredDestinations.map((destination) => {
+            const isPending = pendingDestination?.id === destination.id;
+            const dateRange = formatDestinationRange(destination.date_start, destination.date_end);
+
+            return (
+              <button
+                key={destination.id}
+                type="button"
+                onClick={() => {
+                  setPendingDestination(destination);
+                  setSubmitError("");
+                }}
+                className={`flex w-full items-start justify-between gap-4 border-b border-stone-200 px-4 py-3 text-left last:border-b-0 ${
+                  isPending ? "bg-amber-50" : "hover:bg-stone-50"
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-stone-900">{getDestinationLabel(destination)}</span>
+                  {dateRange ? <span className="mt-1 block text-xs text-stone-500">{dateRange}</span> : null}
+                </span>
+                {isPending ? <span className="text-xs font-medium uppercase tracking-[0.2em] text-amber-700">Selected</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {!stickyConfirm ? confirmContent : null}
+      {stickyConfirm ? confirmContent : null}
+    </div>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Assign Destination">{content}</ActionMenu>;
+}
+
+export default function BulkActionBar({ selectedIds, people, allTags, locationOptions, onAction, onClear }) {
+  const [activeAction, setActiveAction] = useState("");
+
+  if (selectedIds.size === 0) {
+    return null;
+  }
+
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-l border-stone-300 bg-white">
       <div className="border-b border-stone-200 px-6 py-5">
@@ -198,295 +951,70 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={() => setActiveAction("add-tag")} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={() => setActiveAction("assign-destination")} className="btn-secondary">
+            Assign Destination
+          </button>
+          <button type="button" onClick={() => setActiveAction("add-tag")} className="btn-secondary">
             Add Tag
           </button>
-          <button type="button" onClick={() => setActiveAction("remove-tag")} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={() => setActiveAction("remove-tag")} className="btn-secondary">
             Remove Tag
           </button>
-          <button type="button" onClick={() => setActiveAction("add-person")} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={() => setActiveAction("add-person")} className="btn-secondary">
             Add Person
           </button>
-          <button type="button" onClick={() => setActiveAction("remove-person")} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={() => setActiveAction("remove-person")} className="btn-secondary">
             Remove Person
           </button>
-          <button type="button" onClick={() => setActiveAction("set-location")} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={() => setActiveAction("set-location")} className="btn-secondary">
             Set Location
           </button>
-          <button type="button" onClick={onClear} className="btn-secondary" disabled={isSubmitting}>
+          <button type="button" onClick={onClear} className="btn-secondary">
             Clear Selection
           </button>
         </div>
 
-        {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+        {activeAction === "assign-destination" ? (
+          <div className="mt-4">
+            <AssignDestinationAction
+              selectedIds={selectedIds}
+              onDone={onAction}
+              onClose={() => setActiveAction("")}
+            />
+          </div>
+        ) : null}
 
         {activeAction === "add-tag" ? (
           <div className="mt-4">
-            <ActionMenu title="Add Tag">
-              <div className="flex flex-wrap gap-3">
-                <input
-                  type="text"
-                  value={tagName}
-                  onChange={(event) => setTagName(event.target.value)}
-                  className="field min-w-[240px] flex-1"
-                  placeholder="Tag name"
-                />
-                <button
-                  type="button"
-                  onClick={() => submitBulkAction({ add_tags: [tagName.trim()] })}
-                  disabled={isSubmitting || !tagName.trim()}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? "Applying..." : "Apply"}
-                </button>
-              </div>
-            </ActionMenu>
+            <AddTagAction selectedIds={selectedIds} onDone={onAction} />
           </div>
         ) : null}
 
         {activeAction === "remove-tag" ? (
           <div className="mt-4">
-            <ActionMenu title="Remove Tag">
-              <div className="max-h-48 space-y-2 overflow-auto border border-stone-200 bg-stone-50 p-3">
-                {allTags.map((tag) => (
-                  <label key={tag.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white">
-                    <input
-                      type="checkbox"
-                      checked={selectedTagNames.includes(tag.name)}
-                      onChange={() => toggleTag(tag.name)}
-                      className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
-                    />
-                    <span className="text-sm text-stone-700">{tag.name}</span>
-                  </label>
-                ))}
-              </div>
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => submitBulkAction({ remove_tags: selectedTagNames })}
-                  disabled={isSubmitting || selectedTagNames.length === 0}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? "Applying..." : "Apply"}
-                </button>
-              </div>
-            </ActionMenu>
+            <RemoveTagAction selectedIds={selectedIds} allTags={allTags} onDone={onAction} />
           </div>
         ) : null}
 
         {activeAction === "add-person" ? (
           <div className="mt-4">
-            <ActionMenu title="Add Person">
-              <div className="flex flex-wrap gap-2">
-                {primaryPeople.map((person) => {
-                  const isSelected = selectedPeopleIds.includes(person.id);
-
-                  return (
-                    <button
-                      key={person.id}
-                      type="button"
-                      onClick={() => togglePerson(person.id)}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                        isSelected
-                          ? "border-amber-400 bg-amber-100 text-amber-900"
-                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
-                      }`}
-                    >
-                      {person.name}
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedPeopleIds.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedPeopleIds
-                    .map((id) => availablePeople.find((person) => person.id === id))
-                    .filter(Boolean)
-                    .filter((person) => !PRIMARY_PEOPLE.includes(person.name))
-                    .map((person) => (
-                      <button
-                        key={person.id}
-                        type="button"
-                        onClick={() => togglePerson(person.id)}
-                        className="rounded-full border border-stone-300 bg-stone-100 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-200"
-                      >
-                        {person.name} ×
-                      </button>
-                    ))}
-                </div>
-              ) : null}
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => submitBulkAction({ add_people: selectedPeopleIds })}
-                  disabled={isSubmitting || selectedPeopleIds.length === 0}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? "Applying..." : "Apply"}
-                </button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-3">
-                <input
-                  type="text"
-                  value={newPersonName}
-                  onChange={(event) => setNewPersonName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === ",") {
-                      event.preventDefault();
-                      if (!addExistingPersonByName(newPersonName)) {
-                        handleCreatePerson();
-                      }
-                    }
-                  }}
-                  className="field min-w-[240px] flex-1"
-                  placeholder="Add another person..."
-                  list="bulk-add-person-suggestions"
-                />
-                <datalist id="bulk-add-person-suggestions">
-                  {otherPeople.map((person) => (
-                    <option key={person.id} value={person.name} />
-                  ))}
-                </datalist>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!addExistingPersonByName(newPersonName)) {
-                      handleCreatePerson();
-                    }
-                  }}
-                  disabled={isSubmitting || !newPersonName.trim()}
-                  className="btn-secondary"
-                >
-                  Add New Person
-                </button>
-              </div>
-            </ActionMenu>
+            <AddPersonAction selectedIds={selectedIds} people={people} onDone={onAction} />
           </div>
         ) : null}
 
         {activeAction === "remove-person" ? (
           <div className="mt-4">
-            <ActionMenu title="Remove Person">
-              <div className="flex flex-wrap gap-2">
-                {primaryPeople.map((person) => {
-                  const isSelected = selectedPeopleIds.includes(person.id);
-
-                  return (
-                    <button
-                      key={person.id}
-                      type="button"
-                      onClick={() => togglePerson(person.id)}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                        isSelected
-                          ? "border-amber-400 bg-amber-100 text-amber-900"
-                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
-                      }`}
-                    >
-                      {person.name}
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedPeopleIds.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedPeopleIds
-                    .map((id) => availablePeople.find((person) => person.id === id))
-                    .filter(Boolean)
-                    .filter((person) => !PRIMARY_PEOPLE.includes(person.name))
-                    .map((person) => (
-                      <button
-                        key={person.id}
-                        type="button"
-                        onClick={() => togglePerson(person.id)}
-                        className="rounded-full border border-stone-300 bg-stone-100 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-200"
-                      >
-                        {person.name} ×
-                      </button>
-                    ))}
-                </div>
-              ) : null}
-              <div className="mt-3">
-                <input
-                  type="text"
-                  value={newPersonName}
-                  onChange={(event) => setNewPersonName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === ",") {
-                      event.preventDefault();
-                      addExistingPersonByName(newPersonName);
-                    }
-                  }}
-                  className="field"
-                  placeholder="Select another person to remove..."
-                  list="bulk-remove-person-suggestions"
-                />
-                <datalist id="bulk-remove-person-suggestions">
-                  {otherPeople.map((person) => (
-                    <option key={person.id} value={person.name} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => submitBulkAction({ remove_people: selectedPeopleIds })}
-                  disabled={isSubmitting || selectedPeopleIds.length === 0}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? "Applying..." : "Apply"}
-                </button>
-              </div>
-            </ActionMenu>
+            <RemovePersonAction selectedIds={selectedIds} people={people} onDone={onAction} />
           </div>
         ) : null}
 
         {activeAction === "set-location" ? (
           <div className="mt-4">
-            <ActionMenu title="Set Location">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <LocationAutocompleteInput
-                  id="bulk-neighborhood"
-                  value={location.neighborhood}
-                  onChange={(value) => setLocation((current) => ({ ...current, neighborhood: value }))}
-                  options={locationOptions?.neighborhoods || []}
-                  placeholder="Neighborhood"
-                />
-                <LocationAutocompleteInput
-                  id="bulk-city"
-                  value={location.city}
-                  onChange={(value) => setLocation((current) => ({ ...current, city: value }))}
-                  options={locationOptions?.cities || []}
-                  placeholder="City"
-                />
-                <LocationAutocompleteInput
-                  id="bulk-region"
-                  value={location.region}
-                  onChange={(value) => setLocation((current) => ({ ...current, region: value }))}
-                  options={locationOptions?.regions || []}
-                  placeholder="Region"
-                />
-                <LocationAutocompleteInput
-                  id="bulk-country"
-                  value={location.country}
-                  onChange={(value) => setLocation((current) => ({ ...current, country: value }))}
-                  options={locationOptions?.countries || []}
-                  placeholder="Country"
-                />
-              </div>
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => submitBulkAction(buildLocationUpdates())}
-                  disabled={
-                    isSubmitting
-                    || Object.keys(buildLocationUpdates()).length === 0
-                  }
-                  className="btn-primary"
-                >
-                  {isSubmitting ? "Applying..." : "Apply"}
-                </button>
-              </div>
-            </ActionMenu>
+            <SetLocationAction
+              selectedIds={selectedIds}
+              locationOptions={locationOptions}
+              onDone={onAction}
+            />
           </div>
         ) : null}
       </div>

@@ -11,7 +11,6 @@
     "build": "npm run build:client",
     "build:client": "vite build --config client/vite.config.js",
     "import:dayone": "node scripts/import-dayone.js",
-    "sync:ai-search": "node scripts/sync-ai-search-docs.js",
     "start": "node server/index.js",
     "start:local": "npm run build:client && npm start"
   },

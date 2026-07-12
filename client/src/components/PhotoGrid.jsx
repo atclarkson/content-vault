@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { appendPhotoVersion } from "../photoUrls";
 
 const PHOTO_TILE_STYLE = {
@@ -39,40 +39,67 @@ export default function PhotoGrid({
   onPhotoClick,
   selectedIds,
   onSelectionChange,
+  selectionAnchorRef,
+  visiblePhotoIds,
   embedded = false,
   showSortControl = true
 }) {
   const photoCount = photos.length;
-  const lastToggledIdRef = useRef(null);
-  const dragSelectionRef = useRef({
-    active: false,
-    touchedIds: new Set(),
-    selection: new Set(),
-    shouldSelect: true,
-    startPhotoId: null,
-    startX: 0,
-    startY: 0
-  });
+  const internalSelectionAnchorRef = useRef(null);
   const suppressClickRef = useRef(false);
+  const lastPointerTypeRef = useRef("");
+  const touchSelectionRef = useRef({
+    photoId: null,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    longPressTriggered: false,
+    timerId: null
+  });
+  const gridRef = useRef(null);
+  const marqueeStateRef = useRef({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    hasExceededThreshold: false,
+    active: false,
+    baselineSelection: new Set(),
+    additive: false,
+    firstTouchedId: null
+  });
+  const [marqueeRect, setMarqueeRect] = useState(null);
+  const activeSelectionAnchorRef = selectionAnchorRef || internalSelectionAnchorRef;
+  const orderedPhotoIds = visiblePhotoIds || photos.map((photo) => photo.id);
 
   useEffect(() => {
-    function handlePointerUp() {
-      dragSelectionRef.current.active = false;
-      dragSelectionRef.current.startPhotoId = null;
-      dragSelectionRef.current.touchedIds = new Set();
-    }
-
-    window.addEventListener("pointerup", handlePointerUp);
-
     return () => {
-      window.removeEventListener("pointerup", handlePointerUp);
+      if (touchSelectionRef.current.timerId) {
+        window.clearTimeout(touchSelectionRef.current.timerId);
+      }
     };
   }, []);
 
+  function resetTouchSelection() {
+    if (touchSelectionRef.current.timerId) {
+      window.clearTimeout(touchSelectionRef.current.timerId);
+    }
+
+    touchSelectionRef.current = {
+      photoId: null,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      longPressTriggered: false,
+      timerId: null
+    };
+  }
+
   function toggleRange(photoId, shouldSelect) {
     const nextSelectedIds = new Set(selectedIds);
-    const currentIndex = photos.findIndex((photo) => photo.id === photoId);
-    const lastIndex = photos.findIndex((photo) => photo.id === lastToggledIdRef.current);
+    const currentIndex = orderedPhotoIds.indexOf(photoId);
+    const lastIndex = orderedPhotoIds.indexOf(activeSelectionAnchorRef.current);
 
     if (currentIndex === -1 || lastIndex === -1) {
       return toggleSelection(selectedIds, photoId, shouldSelect);
@@ -82,7 +109,7 @@ export default function PhotoGrid({
     const endIndex = Math.max(currentIndex, lastIndex);
 
     for (let index = startIndex; index <= endIndex; index += 1) {
-      const rangePhotoId = photos[index].id;
+      const rangePhotoId = orderedPhotoIds[index];
 
       if (shouldSelect) {
         nextSelectedIds.add(rangePhotoId);
@@ -93,24 +120,141 @@ export default function PhotoGrid({
 
     return nextSelectedIds;
   }
-
-  function applyDraggedSelection(photoId) {
-    if (dragSelectionRef.current.touchedIds.has(photoId)) {
-      return;
-    }
-
-    dragSelectionRef.current.touchedIds.add(photoId);
-
-    if (dragSelectionRef.current.shouldSelect) {
-      dragSelectionRef.current.selection.add(photoId);
-    } else {
-      dragSelectionRef.current.selection.delete(photoId);
-    }
-
-    onSelectionChange(new Set(dragSelectionRef.current.selection));
+  function setAnchor(photoId) {
+    activeSelectionAnchorRef.current = photoId;
   }
 
   function handleTilePointerDown(event, photoId, isSelected) {
+    lastPointerTypeRef.current = event.pointerType || "";
+
+    if (event.pointerType === "touch") {
+      suppressClickRef.current = false;
+      touchSelectionRef.current.photoId = photoId;
+      touchSelectionRef.current.pointerId = event.pointerId;
+      touchSelectionRef.current.startX = event.clientX;
+      touchSelectionRef.current.startY = event.clientY;
+      touchSelectionRef.current.longPressTriggered = false;
+      touchSelectionRef.current.timerId = window.setTimeout(() => {
+        touchSelectionRef.current.longPressTriggered = true;
+        suppressClickRef.current = true;
+        navigator.vibrate?.(10);
+        onSelectionChange(toggleSelection(selectedIds, photoId, true));
+        setAnchor(photoId);
+      }, 500);
+      return;
+    }
+
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+
+    if (event.button !== 0) {
+      return;
+    }
+  }
+
+  function handleTilePointerMove(event, photoId) {
+    if (event.pointerType === "touch") {
+      const touchState = touchSelectionRef.current;
+
+      if (touchState.pointerId !== event.pointerId || touchState.photoId !== photoId) {
+        return;
+      }
+
+      const distance = Math.hypot(event.clientX - touchState.startX, event.clientY - touchState.startY);
+
+      if (distance > 8 && !touchState.longPressTriggered) {
+        resetTouchSelection();
+      }
+
+      return;
+    }
+
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+  }
+
+  function handleTilePointerUp(event, photoId, isSelected) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    const touchState = touchSelectionRef.current;
+
+    if (touchState.pointerId !== event.pointerId || touchState.photoId !== photoId) {
+      return;
+    }
+
+    if (touchState.longPressTriggered) {
+      resetTouchSelection();
+      return;
+    }
+
+    resetTouchSelection();
+
+    if (selectedIds.size >= 1) {
+      suppressClickRef.current = true;
+      onSelectionChange(toggleSelection(selectedIds, photoId, !isSelected));
+    }
+  }
+
+  function handleTilePointerCancel(event, photoId) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    if (touchSelectionRef.current.photoId === photoId) {
+      resetTouchSelection();
+    }
+  }
+
+  function computeMarqueeRect(startX, startY, currentX, currentY) {
+    return {
+      left: Math.min(startX, currentX),
+      top: Math.min(startY, currentY),
+      width: Math.abs(currentX - startX),
+      height: Math.abs(currentY - startY)
+    };
+  }
+
+  function rectsIntersect(rect, bounds) {
+    return !(
+      rect.left + rect.width < bounds.left
+      || rect.left > bounds.right
+      || rect.top + rect.height < bounds.top
+      || rect.top > bounds.bottom
+    );
+  }
+
+  function updateMarqueeSelection() {
+    const marqueeState = marqueeStateRef.current;
+    const rect = computeMarqueeRect(
+      marqueeState.startX,
+      marqueeState.startY,
+      marqueeState.currentX,
+      marqueeState.currentY
+    );
+    const tileElements = [...(gridRef.current?.querySelectorAll("[data-photo-tile='true']") || [])];
+    const hitIds = tileElements
+      .filter((element) => rectsIntersect(rect, element.getBoundingClientRect()))
+      .map((element) => Number(element.dataset.photoId))
+      .filter((photoId) => Number.isInteger(photoId));
+
+    if (hitIds.length > 0 && marqueeState.firstTouchedId === null) {
+      marqueeState.firstTouchedId = hitIds[0];
+      setAnchor(hitIds[0]);
+    }
+
+    const nextSelectedIds = marqueeState.additive
+      ? new Set([...marqueeState.baselineSelection, ...hitIds])
+      : new Set(hitIds);
+
+    onSelectionChange(nextSelectedIds);
+    setMarqueeRect(rect);
+  }
+
+  function handleGridPointerDown(event) {
     if (event.pointerType && event.pointerType !== "mouse") {
       return;
     }
@@ -119,49 +263,88 @@ export default function PhotoGrid({
       return;
     }
 
-    dragSelectionRef.current.active = false;
-    dragSelectionRef.current.touchedIds = new Set();
-    dragSelectionRef.current.selection = new Set(selectedIds);
-    dragSelectionRef.current.shouldSelect = !isSelected;
-    dragSelectionRef.current.startPhotoId = photoId;
-    dragSelectionRef.current.startX = event.clientX;
-    dragSelectionRef.current.startY = event.clientY;
+    marqueeStateRef.current.pointerId = event.pointerId;
+    marqueeStateRef.current.startX = event.clientX;
+    marqueeStateRef.current.startY = event.clientY;
+    marqueeStateRef.current.currentX = event.clientX;
+    marqueeStateRef.current.currentY = event.clientY;
+    marqueeStateRef.current.hasExceededThreshold = false;
+    marqueeStateRef.current.active = false;
+    marqueeStateRef.current.baselineSelection = new Set(selectedIds);
+    marqueeStateRef.current.additive = event.shiftKey || event.metaKey || event.ctrlKey;
+    marqueeStateRef.current.firstTouchedId = null;
   }
 
-  function handleTilePointerMove(event, photoId) {
+  function handleGridPointerMove(event) {
     if (event.pointerType && event.pointerType !== "mouse") {
       return;
     }
 
-    const dragState = dragSelectionRef.current;
+    const marqueeState = marqueeStateRef.current;
 
-    if (dragState.startPhotoId !== photoId || dragState.active) {
+    if (marqueeState.pointerId !== event.pointerId) {
       return;
     }
 
-    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+    marqueeState.currentX = event.clientX;
+    marqueeState.currentY = event.clientY;
 
-    if (distance < 6) {
+    if (!marqueeState.hasExceededThreshold) {
+      const distance = Math.hypot(event.clientX - marqueeState.startX, event.clientY - marqueeState.startY);
+
+      if (distance < 6) {
+        return;
+      }
+
+      marqueeState.hasExceededThreshold = true;
+      marqueeState.active = true;
+      suppressClickRef.current = true;
+      gridRef.current?.setPointerCapture?.(event.pointerId);
+    }
+
+    if (!marqueeState.active) {
       return;
     }
 
-    dragState.active = true;
-    suppressClickRef.current = true;
-    lastToggledIdRef.current = photoId;
-    applyDraggedSelection(photoId);
+    updateMarqueeSelection();
   }
 
-  function handleTilePointerEnter(event, photoId) {
+  function handleGridPointerUp(event) {
     if (event.pointerType && event.pointerType !== "mouse") {
       return;
     }
 
-    if (!dragSelectionRef.current.active) {
+    const marqueeState = marqueeStateRef.current;
+
+    if (marqueeState.pointerId !== event.pointerId) {
       return;
     }
 
-    lastToggledIdRef.current = photoId;
-    applyDraggedSelection(photoId);
+    if (marqueeState.active) {
+      suppressClickRef.current = true;
+    }
+
+    marqueeState.pointerId = null;
+    marqueeState.active = false;
+    marqueeState.hasExceededThreshold = false;
+    marqueeState.firstTouchedId = null;
+    setMarqueeRect(null);
+  }
+
+  function handleGridPointerCancel(event) {
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+
+    if (marqueeStateRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    marqueeStateRef.current.pointerId = null;
+    marqueeStateRef.current.active = false;
+    marqueeStateRef.current.hasExceededThreshold = false;
+    marqueeStateRef.current.firstTouchedId = null;
+    setMarqueeRect(null);
   }
 
   if (photoCount === 0) {
@@ -213,7 +396,15 @@ export default function PhotoGrid({
       ) : null}
 
       <div className={embedded ? "" : "min-h-0 flex-1 overflow-y-auto"}>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <div
+          ref={gridRef}
+          onPointerDown={handleGridPointerDown}
+          onPointerMove={handleGridPointerMove}
+          onPointerUp={handleGridPointerUp}
+          onPointerCancel={handleGridPointerCancel}
+          className="relative"
+        >
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {photos.map((photo) => {
             const isSelected = selectedIds.has(photo.id);
             const showWarning = needsAiCaption(photo);
@@ -221,9 +412,12 @@ export default function PhotoGrid({
             return (
               <article
                 key={photo.id}
+                data-photo-tile="true"
+                data-photo-id={photo.id}
                 onPointerDown={(event) => handleTilePointerDown(event, photo.id, isSelected)}
                 onPointerMove={(event) => handleTilePointerMove(event, photo.id)}
-                onPointerEnter={(event) => handleTilePointerEnter(event, photo.id)}
+                onPointerUp={(event) => handleTilePointerUp(event, photo.id, isSelected)}
+                onPointerCancel={(event) => handleTilePointerCancel(event, photo.id)}
                 style={PHOTO_TILE_STYLE}
                 className={`group relative overflow-hidden rounded-[1.75rem] border bg-stone-100 transition ${
                   isSelected
@@ -233,9 +427,41 @@ export default function PhotoGrid({
               >
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(event) => {
                     if (suppressClickRef.current) {
                       suppressClickRef.current = false;
+                      return;
+                    }
+
+                    if (lastPointerTypeRef.current === "touch" && selectedIds.size >= 1) {
+                      const shouldSelect = !isSelected;
+                      const nextSelectedIds = toggleSelection(selectedIds, photo.id, shouldSelect);
+                      onSelectionChange(nextSelectedIds);
+                      return;
+                    }
+
+                    const shiftKey = Boolean(event.shiftKey);
+                    const metaOrCtrlKey = Boolean(event.metaKey || event.ctrlKey);
+
+                    if (shiftKey) {
+                      const anchorId = activeSelectionAnchorRef.current;
+
+                      if (!anchorId) {
+                        const nextSelectedIds = toggleSelection(selectedIds, photo.id, !isSelected);
+                        onSelectionChange(nextSelectedIds);
+                        setAnchor(photo.id);
+                        return;
+                      }
+
+                      const nextSelectedIds = toggleRange(photo.id, true);
+                      onSelectionChange(nextSelectedIds);
+                      return;
+                    }
+
+                    if (metaOrCtrlKey) {
+                      const nextSelectedIds = toggleSelection(selectedIds, photo.id, !isSelected);
+                      onSelectionChange(nextSelectedIds);
+                      setAnchor(photo.id);
                       return;
                     }
 
@@ -261,19 +487,16 @@ export default function PhotoGrid({
 
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-stone-950/70 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
 
-                    <div className={`absolute left-3 top-3 z-10 transition ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                    <div className={`absolute left-3 top-3 z-10 hidden xl:block transition ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                       <input
                         type="checkbox"
                         checked={isSelected}
                         onChange={(event) => {
                           event.stopPropagation();
                           const shouldSelect = event.target.checked;
-                          const nextSelectedIds = event.nativeEvent.shiftKey
-                            ? toggleRange(photo.id, shouldSelect)
-                            : toggleSelection(selectedIds, photo.id, shouldSelect);
-
-                          lastToggledIdRef.current = photo.id;
+                          const nextSelectedIds = toggleSelection(selectedIds, photo.id, shouldSelect);
                           onSelectionChange(nextSelectedIds);
+                          setAnchor(photo.id);
                         }}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -300,6 +523,18 @@ export default function PhotoGrid({
               </article>
             );
           })}
+          </div>
+          {marqueeRect ? (
+            <div
+              className="pointer-events-none absolute z-20 border border-amber-400 bg-amber-200/20"
+              style={{
+                left: `${marqueeRect.left - (gridRef.current?.getBoundingClientRect().left || 0)}px`,
+                top: `${marqueeRect.top - (gridRef.current?.getBoundingClientRect().top || 0)}px`,
+                width: `${marqueeRect.width}px`,
+                height: `${marqueeRect.height}px`
+              }}
+            />
+          ) : null}
         </div>
       </div>
     </section>
