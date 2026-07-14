@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS photo_tags (
   FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS photo_usages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  photo_uuid TEXT NOT NULL,
+  post_slug TEXT NOT NULL,
+  post_title TEXT,
+  placement TEXT,
+  used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (photo_uuid) REFERENCES photos (uuid) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tag_groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -226,6 +236,9 @@ CREATE INDEX IF NOT EXISTS idx_person_face_refs_person_id ON person_face_refs (p
 CREATE INDEX IF NOT EXISTS idx_person_face_refs_photo_id ON person_face_refs (photo_id);
 CREATE INDEX IF NOT EXISTS idx_photo_face_matches_photo_id_image_version ON photo_face_matches (photo_id, image_version);
 CREATE INDEX IF NOT EXISTS idx_photo_face_matches_status ON photo_face_matches (status);
+CREATE INDEX IF NOT EXISTS idx_photo_usages_photo_uuid ON photo_usages (photo_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_usages_unique_usage
+  ON photo_usages (photo_uuid, post_slug, COALESCE(placement, ''));
 CREATE INDEX IF NOT EXISTS idx_tag_groups_sort_order ON tag_groups (sort_order);
 CREATE INDEX IF NOT EXISTS idx_destinations_date_start ON destinations (date_start);
 CREATE INDEX IF NOT EXISTS idx_videos_date_published ON videos (date_published);

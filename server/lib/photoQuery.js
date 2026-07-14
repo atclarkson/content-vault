@@ -3,14 +3,8 @@ function queryPhotos(db, options = {}) {
   const filters = buildPhotoQueryFilters(normalizedOptions.filters);
   const orderByClause = buildPhotoOrderByClause(normalizedOptions.sort);
 
-  const rows = db.prepare(`
-    SELECT photos.*
-    FROM photos
-    ${filters.whereClause}
-    ${orderByClause}
-    LIMIT ?
-    OFFSET ?
-  `).all(...filters.params, normalizedOptions.limit, normalizedOptions.offset);
+  const rows = db.prepare(buildPhotoRowsSql(normalizedOptions.view, filters.whereClause, orderByClause))
+    .all(...filters.params, normalizedOptions.limit, normalizedOptions.offset);
 
   const totalRow = db.prepare(`
     SELECT COUNT(*) AS count
@@ -18,7 +12,7 @@ function queryPhotos(db, options = {}) {
     ${filters.whereClause}
   `).get(...filters.params);
 
-  const items = attachPeopleAndTags(db, rows).map((photo) => mapPhotoView(photo, normalizedOptions.view));
+  const items = mapPhotoItems(db, rows, normalizedOptions.view);
 
   return {
     items,
@@ -34,12 +28,13 @@ function normalizePhotoQueryOptions(options) {
   const filtersSource = source.filters && typeof source.filters === "object" && !Array.isArray(source.filters)
     ? source.filters
     : source;
+  const view = normalizePhotoView(source.view);
 
   return {
     filters: normalizePhotoQueryFilters(filtersSource),
     sort: normalizePhotoSort(source.sort),
-    view: normalizePhotoView(source.view),
-    limit: normalizePositiveInteger(source.limit, 50, 0, 200),
+    view,
+    limit: normalizePositiveInteger(source.limit, 50, 0, view === "index" ? 100 : 200),
     offset: normalizePositiveInteger(source.offset, 0, 0, 100000)
   };
 }
@@ -48,7 +43,7 @@ function normalizePhotoQueryFilters(filters) {
   const source = filters && typeof filters === "object" && !Array.isArray(filters) ? filters : {};
 
   return {
-    ids: normalizeIdArray(source.ids),
+    ids: normalizeIdentifierArray(source.ids),
     text: normalizeOptionalString(source.text),
     peopleAll: normalizeStringArray(source.people_all),
     peopleAny: normalizeStringArray(source.people_any),
@@ -80,9 +75,30 @@ function buildPhotoQueryFilters(filters) {
   }
 
   if (filters.ids.length > 0) {
-    const placeholders = createPlaceholders(filters.ids.length);
-    conditions.push(`photos.id IN (${placeholders})`);
-    params.push(...filters.ids);
+    const numericIds = [];
+    const uuidIds = [];
+
+    for (const id of filters.ids) {
+      if (/^\d+$/.test(id)) {
+        numericIds.push(Number(id));
+      } else {
+        uuidIds.push(id);
+      }
+    }
+
+    if (numericIds.length > 0 && uuidIds.length > 0) {
+      conditions.push(`(
+        photos.id IN (${createPlaceholders(numericIds.length)})
+        OR photos.uuid IN (${createPlaceholders(uuidIds.length)})
+      )`);
+      params.push(...numericIds, ...uuidIds);
+    } else if (numericIds.length > 0) {
+      conditions.push(`photos.id IN (${createPlaceholders(numericIds.length)})`);
+      params.push(...numericIds);
+    } else if (uuidIds.length > 0) {
+      conditions.push(`photos.uuid IN (${createPlaceholders(uuidIds.length)})`);
+      params.push(...uuidIds);
+    }
   }
 
   if (filters.text) {
@@ -359,19 +375,19 @@ function normalizeStringArray(values) {
   )];
 }
 
-function normalizeIdArray(values) {
+function normalizeIdentifierArray(values) {
   if (values === undefined || values === null) {
     return [];
   }
 
   if (!Array.isArray(values)) {
-    throw new Error("ids must be an array of positive integers");
+    throw new Error("ids must be an array of photo ids or uuids");
   }
 
-  const ids = values.map((value) => Number(value));
+  const ids = values.map((value) => String(value).trim()).filter(Boolean);
 
-  if (ids.some((value) => !Number.isInteger(value) || value <= 0)) {
-    throw new Error("ids must be an array of positive integers");
+  if (ids.length !== values.length) {
+    throw new Error("ids must be an array of photo ids or uuids");
   }
 
   return [...new Set(ids)];
@@ -430,7 +446,7 @@ function normalizePhotoSort(value) {
 function normalizePhotoView(value) {
   const view = normalizeOptionalString(value) || "summary";
 
-  if (view !== "summary" && view !== "full" && view !== "blog") {
+  if (view !== "summary" && view !== "full" && view !== "blog" && view !== "index") {
     throw new Error(`Unsupported view: ${view}`);
   }
 
@@ -504,7 +520,110 @@ function attachPeopleAndTags(db, photos) {
   }));
 }
 
+function attachPhotoUsages(db, photos) {
+  if (photos.length === 0) {
+    return [];
+  }
+
+  const photoUuids = photos.map((photo) => photo.uuid);
+  const usageRows = db.prepare(`
+    SELECT photo_uuid, post_slug, placement, used_at
+    FROM photo_usages
+    WHERE photo_uuid IN (${createPlaceholders(photoUuids.length)})
+    ORDER BY used_at DESC, id DESC
+  `).all(...photoUuids);
+
+  const usageMap = new Map();
+
+  for (const row of usageRows) {
+    if (!usageMap.has(row.photo_uuid)) {
+      usageMap.set(row.photo_uuid, []);
+    }
+
+    usageMap.get(row.photo_uuid).push({
+      post_slug: row.post_slug,
+      placement: row.placement,
+      used_at: row.used_at
+    });
+  }
+
+  for (const usages of usageMap.values()) {
+    usages.sort((left, right) => (
+      String(right.used_at || "").localeCompare(String(left.used_at || ""))
+      || String(right.post_slug || "").localeCompare(String(left.post_slug || ""))
+    ));
+  }
+
+  return photos.map((photo) => ({
+    ...photo,
+    used_in: usageMap.get(photo.uuid) || []
+  }));
+}
+
+function buildPhotoRowsSql(view, whereClause, orderByClause) {
+  if (view === "index") {
+    return `
+      SELECT
+        photos.uuid,
+        photos.title,
+        photos.alt_text,
+        photos.width,
+        photos.height,
+        photos.captured_at,
+        COALESCE(photo_usage_counts.used_in_count, 0) AS used_in_count
+      FROM photos
+      LEFT JOIN (
+        SELECT photo_uuid, COUNT(*) AS used_in_count
+        FROM photo_usages
+        GROUP BY photo_uuid
+      ) AS photo_usage_counts
+        ON photo_usage_counts.photo_uuid = photos.uuid
+      ${whereClause}
+      ${orderByClause}
+      LIMIT ?
+      OFFSET ?
+    `;
+  }
+
+  return `
+    SELECT photos.*
+    FROM photos
+    ${whereClause}
+    ${orderByClause}
+    LIMIT ?
+    OFFSET ?
+  `;
+}
+
+function mapPhotoItems(db, rows, view) {
+  if (view === "index") {
+    return rows.map((photo) => mapPhotoView(photo, view));
+  }
+
+  let hydratedPhotos = rows;
+
+  if (view === "blog" || view === "full") {
+    hydratedPhotos = attachPhotoUsages(db, attachPeopleAndTags(db, rows));
+  } else if (view === "summary") {
+    hydratedPhotos = attachPeopleAndTags(db, rows);
+  }
+
+  return hydratedPhotos.map((photo) => mapPhotoView(photo, view));
+}
+
 function mapPhotoView(photo, view) {
+  if (view === "index") {
+    return {
+      uuid: photo.uuid,
+      title: photo.title,
+      alt_text: photo.alt_text,
+      width: photo.width,
+      height: photo.height,
+      captured_at: photo.captured_at,
+      used_in_count: Number(photo.used_in_count || 0)
+    };
+  }
+
   if (view === "summary") {
     return {
       id: photo.id,
@@ -544,11 +663,15 @@ function mapPhotoView(photo, view) {
       country: photo.country,
       location_label: photo.location_label,
       people: photo.people || [],
-      tags: photo.tags || []
+      tags: photo.tags || [],
+      used_in: photo.used_in || []
     };
   }
 
-  return photo;
+  return {
+    ...photo,
+    used_in: photo.used_in || []
+  };
 }
 
 function parseEditRecipeJson(value) {

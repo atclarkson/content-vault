@@ -3,13 +3,25 @@ const assert = require("node:assert/strict");
 
 const { buildPhotoQueryFilters, queryPhotos } = require("./photoQuery");
 
-function createMockDb({ photoRow, total = 1, people = [], tags = [] }) {
+function createMockDb({ rows, photoRow, total = 1, people = [], tags = [], usages = [], onPrepare = null }) {
+  const photoRows = rows || (photoRow ? [photoRow] : []);
+
   return {
     prepare(sql) {
+      onPrepare?.(sql);
+
       if (sql.includes("SELECT photos.*")) {
         return {
           all() {
-            return [photoRow];
+            return photoRows;
+          }
+        };
+      }
+
+      if (sql.includes("SELECT\n        photos.uuid")) {
+        return {
+          all() {
+            return photoRows;
           }
         };
       }
@@ -34,6 +46,14 @@ function createMockDb({ photoRow, total = 1, people = [], tags = [] }) {
         return {
           all() {
             return tags;
+          }
+        };
+      }
+
+      if (sql.includes("FROM photo_usages")) {
+        return {
+          all() {
+            return usages;
           }
         };
       }
@@ -104,6 +124,10 @@ test("queryPhotos blog view returns only the blog payload fields", () => {
     tags: [
       { photo_id: 42, id: 10, name: "japan" },
       { photo_id: 42, id: 11, name: "ramen" }
+    ],
+    usages: [
+      { photo_uuid: "photo-uuid-42", post_slug: "older-post", placement: "inline", used_at: "2024-05-01T10:00:00.000Z" },
+      { photo_uuid: "photo-uuid-42", post_slug: "newer-post", placement: "feature", used_at: "2024-06-01T10:00:00.000Z" }
     ]
   });
 
@@ -125,6 +149,7 @@ test("queryPhotos blog view returns only the blog payload fields", () => {
     "small_url",
     "tags",
     "title",
+    "used_in",
     "uuid",
     "width"
   ]);
@@ -148,7 +173,11 @@ test("queryPhotos blog view returns only the blog payload fields", () => {
       { id: 1, name: "Adam" },
       { id: 2, name: "Lindsay" }
     ],
-    tags: ["japan", "ramen"]
+    tags: ["japan", "ramen"],
+    used_in: [
+      { post_slug: "newer-post", placement: "feature", used_at: "2024-06-01T10:00:00.000Z" },
+      { post_slug: "older-post", placement: "inline", used_at: "2024-05-01T10:00:00.000Z" }
+    ]
   });
 
   assert.equal(result.total, 1);
@@ -160,7 +189,7 @@ test("queryPhotos blog view returns only the blog payload fields", () => {
   const blogPayloadSize = Buffer.byteLength(JSON.stringify(result.items));
   const fullPayloadSize = Buffer.byteLength(JSON.stringify(fullResult.items));
 
-  assert.ok(blogPayloadSize <= fullPayloadSize * 0.4, `Expected blog payload to be <= 40% of full payload (${blogPayloadSize} vs ${fullPayloadSize})`);
+  assert.ok(blogPayloadSize < fullPayloadSize, `Expected blog payload to remain smaller than full payload (${blogPayloadSize} vs ${fullPayloadSize})`);
 });
 
 test("queryPhotos full view is unchanged", () => {
@@ -168,7 +197,8 @@ test("queryPhotos full view is unchanged", () => {
   const db = createMockDb({
     photoRow,
     people: [{ photo_id: 42, id: 1, name: "Adam" }],
-    tags: [{ photo_id: 42, id: 10, name: "japan" }]
+    tags: [{ photo_id: 42, id: 10, name: "japan" }],
+    usages: [{ photo_uuid: "photo-uuid-42", post_slug: "test-post", placement: null, used_at: "2024-07-01T12:00:00.000Z" }]
   });
 
   const result = queryPhotos(db, { view: "full", limit: 10, offset: 5 });
@@ -179,7 +209,8 @@ test("queryPhotos full view is unchanged", () => {
         ...photoRow,
         edit_recipe: { crop: "4:3" },
         people: [{ id: 1, name: "Adam" }],
-        tags: ["japan"]
+        tags: ["japan"],
+        used_in: [{ post_slug: "test-post", placement: null, used_at: "2024-07-01T12:00:00.000Z" }]
       }
     ],
     total: 1,
@@ -214,6 +245,135 @@ test("queryPhotos full view is unchanged", () => {
       offset: 5
     }
   });
+});
+
+test("queryPhotos index view returns only compact scanning fields", () => {
+  const db = createMockDb({
+    rows: [{
+      uuid: "photo-uuid-42",
+      title: "Tokyo alley ramen",
+      alt_text: "A narrow Tokyo alley glowing with lanterns",
+      width: 4032,
+      height: 3024,
+      captured_at: "2024-04-06T19:15:00.000Z",
+      used_in_count: 2
+    }]
+  });
+
+  const result = queryPhotos(db, { view: "index", limit: 100, offset: 0 });
+
+  assert.deepEqual(result.items, [{
+    uuid: "photo-uuid-42",
+    title: "Tokyo alley ramen",
+    alt_text: "A narrow Tokyo alley glowing with lanterns",
+    width: 4032,
+    height: 3024,
+    captured_at: "2024-04-06T19:15:00.000Z",
+    used_in_count: 2
+  }]);
+
+  assert.deepEqual(Object.keys(result.items[0]).sort(), [
+    "alt_text",
+    "captured_at",
+    "height",
+    "title",
+    "used_in_count",
+    "uuid",
+    "width"
+  ]);
+});
+
+test("queryPhotos index view returns used_in_count 0 for unused photos", () => {
+  const db = createMockDb({
+    rows: [{
+      uuid: "photo-uuid-99",
+      title: "Unused photo",
+      alt_text: null,
+      width: 1600,
+      height: 900,
+      captured_at: "2024-04-07T19:15:00.000Z",
+      used_in_count: 0
+    }]
+  });
+
+  const result = queryPhotos(db, { view: "index", limit: 10, offset: 0 });
+  assert.equal(result.items[0].used_in_count, 0);
+});
+
+test("queryPhotos index view accepts limit 100 and rejects 101", () => {
+  const db = createMockDb({
+    rows: [{
+      uuid: "photo-uuid-42",
+      title: "Tokyo alley ramen",
+      alt_text: "A narrow Tokyo alley glowing with lanterns",
+      width: 4032,
+      height: 3024,
+      captured_at: "2024-04-06T19:15:00.000Z",
+      used_in_count: 0
+    }]
+  });
+
+  assert.equal(queryPhotos(db, { view: "index", limit: 100, offset: 0 }).limit, 100);
+  assert.throws(() => queryPhotos(db, { view: "index", limit: 101, offset: 0 }), /between 0 and 100/);
+});
+
+test("queryPhotos blog view returns empty used_in when photo is unused", () => {
+  const photoRow = createFullPhotoRow();
+  const db = createMockDb({ photoRow, people: [], tags: [], usages: [] });
+
+  const result = queryPhotos(db, { view: "blog", limit: 10, offset: 0 });
+  assert.deepEqual(result.items[0].used_in, []);
+});
+
+test("queryPhotos uses one grouped photo_usages query for a 30-photo page", () => {
+  const rows = Array.from({ length: 30 }, (_, index) => ({
+    ...createFullPhotoRow(),
+    id: index + 1,
+    uuid: `photo-uuid-${index + 1}`
+  }));
+  let usageQueryCount = 0;
+  const db = createMockDb({
+    rows,
+    people: [],
+    tags: [],
+    usages: [],
+    onPrepare(sql) {
+      if (sql.includes("FROM photo_usages")) {
+        usageQueryCount += 1;
+      }
+    }
+  });
+
+  queryPhotos(db, { view: "blog", limit: 30, offset: 0 });
+  assert.equal(usageQueryCount, 1);
+});
+
+test("queryPhotos supports uuid ids filter values", () => {
+  const result = buildPhotoQueryFilters({
+    ids: ["photo-uuid-42"],
+    text: null,
+    peopleAll: [],
+    peopleAny: [],
+    tagsAll: [],
+    tagsAny: [],
+    city: null,
+    country: null,
+    orientation: null,
+    minWidth: null,
+    minHeight: null,
+    dateFrom: null,
+    dateTo: null,
+    processingStatus: null,
+    geoStatus: null,
+    missing: [],
+    hasPeople: null,
+    hasTags: null,
+    hasLocation: null,
+    includeDeleted: false
+  });
+
+  assert.match(result.whereClause, /photos\.uuid IN/);
+  assert.deepEqual(result.params, ["photo-uuid-42"]);
 });
 
 test("buildPhotoQueryFilters adds landscape orientation filter in SQL", () => {

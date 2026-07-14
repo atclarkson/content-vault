@@ -1,4 +1,9 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand
+} = require("@aws-sdk/client-s3");
 
 require("dotenv").config();
 
@@ -85,7 +90,24 @@ async function deleteFile(key) {
   );
 }
 
+async function getFile(key) {
+  const config = getR2Config();
+  const client = getR2Client();
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: config.bucketName,
+      Key: key
+    })
+  );
+
+  return {
+    buffer: Buffer.from(await response.Body.transformToByteArray()),
+    contentType: response.ContentType || "application/octet-stream"
+  };
+}
+
 module.exports = {
   uploadFile,
-  deleteFile
+  deleteFile,
+  getFile
 };

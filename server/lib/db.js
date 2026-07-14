@@ -34,6 +34,7 @@ function initializeDatabase() {
   ensureDestinationsTable(database);
   ensureVideoTables(database);
   ensureFaceTables(database);
+  ensurePhotoUsagesTable(database);
   seedPeople(database);
 
   return database;
@@ -262,6 +263,26 @@ function ensureTagGroupsTable(database) {
       sql: "ALTER TABLE tags ADD COLUMN group_id INTEGER REFERENCES tag_groups(id) ON DELETE SET NULL"
     }
   ]);
+}
+
+function ensurePhotoUsagesTable(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS photo_usages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_uuid TEXT NOT NULL,
+      post_slug TEXT NOT NULL,
+      post_title TEXT,
+      placement TEXT,
+      used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (photo_uuid) REFERENCES photos (uuid) ON DELETE CASCADE
+    )
+  `);
+
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photo_usages_photo_uuid ON photo_usages (photo_uuid)");
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_usages_unique_usage
+    ON photo_usages (photo_uuid, post_slug, COALESCE(placement, ''))
+  `);
 }
 
 function ensureVideoTables(database) {
