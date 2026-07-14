@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { bulkUpdate, createPerson, getDestinations, getPeople } from "../api";
+import { bulkUpdate, createPerson, deletePhoto, getDestinations, getPeople } from "../api";
 import LocationAutocompleteInput from "./LocationAutocompleteInput";
 
 const PRIMARY_PEOPLE = ["Adam", "Lindsay", "Lily", "Cora", "Harper"];
@@ -702,6 +702,63 @@ export function SetLocationAction({ selectedIds, locationOptions, onDone, onClea
   return <ActionMenu title="Set Location">{content}</ActionMenu>;
 }
 
+export function DeletePhotosAction({ selectedIds, onDone, onClearSelection, onClose, inline = false }) {
+  const ids = normalizeIds(selectedIds);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit() {
+    if (ids.length === 0 || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      await Promise.all(ids.map((photoId) => deletePhoto(photoId)));
+      onDone?.(ids);
+      onClearSelection?.();
+      onClose?.();
+    } catch (actionError) {
+      setError(actionError.message || "Failed to delete photos");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const content = (
+    <>
+      <p className="text-sm text-stone-600">
+        Delete {ids.length} photo{ids.length === 1 ? "" : "s"}? They will be moved to trash and can be restored.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || ids.length === 0}
+          className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "Deleting..." : "Delete Selected"}
+        </button>
+        {onClose ? (
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="btn-secondary">
+            Cancel
+          </button>
+        ) : null}
+      </div>
+
+      {error ? <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+    </>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return <ActionMenu title="Delete Photos">{content}</ActionMenu>;
+}
+
 export function AssignDestinationAction({
   selectedIds,
   onDone,
@@ -969,6 +1026,9 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
           <button type="button" onClick={() => setActiveAction("set-location")} className="btn-secondary">
             Set Location
           </button>
+          <button type="button" onClick={() => setActiveAction("delete-photos")} className="btn-secondary">
+            Delete Selected
+          </button>
           <button type="button" onClick={onClear} className="btn-secondary">
             Clear Selection
           </button>
@@ -1014,6 +1074,17 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
               selectedIds={selectedIds}
               locationOptions={locationOptions}
               onDone={onAction}
+            />
+          </div>
+        ) : null}
+
+        {activeAction === "delete-photos" ? (
+          <div className="mt-4">
+            <DeletePhotosAction
+              selectedIds={selectedIds}
+              onDone={onAction}
+              onClearSelection={onClear}
+              onClose={() => setActiveAction("")}
             />
           </div>
         ) : null}
