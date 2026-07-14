@@ -5,6 +5,7 @@ const Database = require('better-sqlite3');
 const dbDirectory = path.join(__dirname, '..', 'db');
 const dbPath = path.join(dbDirectory, 'content-vault.db');
 const schemaPath = path.join(dbDirectory, 'schema.sql');
+const DEFAULT_UPLOADER_EMAIL = 'clarksontravels@gmail.com';
 
 let db;
 
@@ -92,6 +93,10 @@ function ensurePhotoColumns(database) {
       sql: "ALTER TABLE photos ADD COLUMN large_url TEXT"
     },
     {
+      name: "uploader_email",
+      sql: `ALTER TABLE photos ADD COLUMN uploader_email TEXT NOT NULL DEFAULT '${DEFAULT_UPLOADER_EMAIL}'`
+    },
+    {
       name: "edit_recipe_json",
       sql: "ALTER TABLE photos ADD COLUMN edit_recipe_json TEXT"
     },
@@ -115,8 +120,16 @@ function ensurePhotoColumns(database) {
     }
   }
 
+  database.prepare(`
+    UPDATE photos
+    SET uploader_email = ?
+    WHERE uploader_email IS NULL
+       OR TRIM(uploader_email) = ''
+  `).run(DEFAULT_UPLOADER_EMAIL);
+
   database.exec("CREATE INDEX IF NOT EXISTS idx_photos_geo_status ON photos (geo_status)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_photos_correction_applied_at ON photos (photo_correction_applied_at)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_photos_uploader_email ON photos (uploader_email)");
 }
 
 function seedPeople(database) {

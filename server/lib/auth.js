@@ -62,8 +62,56 @@ function getAuthSecret() {
   return String(process.env.AUTH_SECRET || "").trim();
 }
 
-function getAllowedEmail() {
-  return String(process.env.ALLOWED_EMAIL || "clarksontravels@gmail.com").trim().toLowerCase();
+function getDefaultAllowedEmails() {
+  return [
+    "clarksontravels@gmail.com"
+  ];
+}
+
+function getAllowedEmails() {
+  const configuredEmails = String(process.env.ALLOWED_EMAILS || process.env.ALLOWED_EMAIL || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return configuredEmails.length > 0 ? configuredEmails : getDefaultAllowedEmails();
+}
+
+function getDefaultAllowedDomains() {
+  return [
+    "clarksontravels.com",
+    "adamandlinds.com"
+  ];
+}
+
+function getAllowedDomains() {
+  const configuredDomains = String(process.env.ALLOWED_EMAIL_DOMAINS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase().replace(/^@+/, ""))
+    .filter(Boolean);
+
+  return configuredDomains.length > 0 ? configuredDomains : getDefaultAllowedDomains();
+}
+
+function isAllowedEmail(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  if (getAllowedEmails().includes(normalizedEmail)) {
+    return true;
+  }
+
+  const atIndex = normalizedEmail.lastIndexOf("@");
+
+  if (atIndex === -1) {
+    return false;
+  }
+
+  const domain = normalizedEmail.slice(atIndex + 1);
+  return getAllowedDomains().includes(domain);
 }
 
 function signValue(value) {
@@ -189,8 +237,10 @@ module.exports = {
   consumeOauthState,
   createBrowserSession,
   createOauthState,
-  getAllowedEmail,
+  getAllowedEmails,
+  getAllowedDomains,
   getBrowserSession,
   hasBrowserSession,
+  isAllowedEmail,
   requireApiAuth
 };

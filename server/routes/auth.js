@@ -4,9 +4,9 @@ const {
   consumeOauthState,
   createBrowserSession,
   createOauthState,
-  getAllowedEmail,
   getBrowserSession,
-  hasBrowserSession
+  hasBrowserSession,
+  isAllowedEmail
 } = require("../lib/auth");
 
 const router = express.Router();
@@ -132,7 +132,7 @@ router.get("/callback/google", async (req, res) => {
       return res.redirect("/login?error=oauth");
     }
 
-    if (email !== getAllowedEmail()) {
+    if (!isAllowedEmail(email)) {
       clearBrowserSession(res);
       return res.redirect("/login?error=not_authorized");
     }

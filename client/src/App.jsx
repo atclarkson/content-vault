@@ -106,7 +106,7 @@ function LoginPage() {
               message on one of our socials or visit our website.
             </p>
             <p>
-              There&apos;s no need to try to log in. All emails are unauthorized except for my personal email.
+              There&apos;s no need to try to log in. Access is limited to approved family accounts only.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm">
               <a

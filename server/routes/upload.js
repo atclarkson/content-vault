@@ -9,6 +9,9 @@ const { hashFile, md5File } = require("../lib/hash");
 const reverseGeocode = require("../lib/geo");
 const { defaultQueue } = require("../lib/queue");
 const { initializeDatabase } = require("../lib/db");
+const { getBrowserSession } = require("../lib/auth");
+
+const DEFAULT_UPLOADER_EMAIL = "clarksontravels@gmail.com";
 
 const router = express.Router();
 const db = initializeDatabase();
@@ -119,8 +122,9 @@ const insertPhoto = db.prepare(`
     original_url,
     thumbnail_url,
     small_url,
-    large_url
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    large_url,
+    uploader_email
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const selectPhotoById = db.prepare(`
@@ -184,6 +188,7 @@ const restoreDeletedPhoto = db.prepare(`
       thumbnail_url = ?,
       small_url = ?,
       large_url = ?,
+      uploader_email = ?,
       uploaded_at = CURRENT_TIMESTAMP,
       updated_at = CURRENT_TIMESTAMP,
       deleted_at = NULL
@@ -211,9 +216,10 @@ router.post("/", upload.array("files"), async (req, res) => {
     }
 
     const results = [];
+    const uploaderEmail = getUploaderEmail(req);
 
     for (const file of req.files) {
-      const result = await processUpload(file);
+      const result = await processUpload(file, uploaderEmail);
       results.push(result);
     }
 
@@ -244,7 +250,7 @@ router.use((error, req, res, next) => {
   next();
 });
 
-async function processUpload(file) {
+async function processUpload(file, uploaderEmail = DEFAULT_UPLOADER_EMAIL) {
   const originalExtension = getExtension(file.originalname);
   const originalMimeType =
     file.mimetype ||
@@ -338,6 +344,7 @@ async function processUpload(file) {
         thumbnailUrl,
         smallUrl,
         largeUrl,
+        uploaderEmail,
         deletedPhoto.id,
       );
 
@@ -384,6 +391,7 @@ async function processUpload(file) {
         thumbnailUrl,
         smallUrl,
         largeUrl,
+        uploaderEmail,
       );
 
       photoId = insertResult.lastInsertRowid;
@@ -400,6 +408,13 @@ async function processUpload(file) {
     await cleanupUploadedFiles(Object.values(keys));
     throw error;
   }
+}
+
+function getUploaderEmail(req) {
+  const sessionEmail = getBrowserSession(req)?.email;
+  const normalizedEmail = String(sessionEmail || "").trim().toLowerCase();
+
+  return normalizedEmail || DEFAULT_UPLOADER_EMAIL;
 }
 
 function buildTitleFromFilename(originalFilename) {

@@ -8,7 +8,10 @@ const {
   consumeOauthState,
   createBrowserSession,
   createOauthState,
-  getBrowserSession
+  getAllowedDomains,
+  getAllowedEmails,
+  getBrowserSession,
+  isAllowedEmail
 } = require("./auth");
 
 function createResponse() {
@@ -50,4 +53,34 @@ test("oauth state must match stored signed cookie", () => {
 
   assert.equal(consumeOauthState(req, res), state);
   assert.equal(consumeOauthState(tamperedReq, res), null);
+});
+
+test("allowed emails can be configured as a comma-separated list", () => {
+  process.env.ALLOWED_EMAILS = "adam@clarksontravels.com, lindsay@clarksontravels.com";
+
+  assert.deepEqual(getAllowedEmails(), [
+    "adam@clarksontravels.com",
+    "lindsay@clarksontravels.com"
+  ]);
+
+  delete process.env.ALLOWED_EMAILS;
+});
+
+test("allowed domains default to family domains", () => {
+  delete process.env.ALLOWED_EMAIL_DOMAINS;
+
+  assert.deepEqual(getAllowedDomains(), [
+    "clarksontravels.com",
+    "adamandlinds.com"
+  ]);
+});
+
+test("allowed email accepts configured domain suffixes and explicit emails", () => {
+  delete process.env.ALLOWED_EMAILS;
+  delete process.env.ALLOWED_EMAIL_DOMAINS;
+
+  assert.equal(isAllowedEmail("adam@clarksontravels.com"), true);
+  assert.equal(isAllowedEmail("lindsay@adamandlinds.com"), true);
+  assert.equal(isAllowedEmail("clarksontravels@gmail.com"), true);
+  assert.equal(isAllowedEmail("someone@example.com"), false);
 });

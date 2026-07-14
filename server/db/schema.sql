@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS photos (
   thumbnail_url TEXT,
   small_url TEXT,
   large_url TEXT,
+  uploader_email TEXT NOT NULL DEFAULT 'clarksontravels@gmail.com',
   edit_recipe_json TEXT,
   correction_status TEXT NOT NULL DEFAULT 'none' CHECK (correction_status IN ('none', 'suggested', 'applied', 'skipped')),
   photo_correction_applied_at TEXT,
