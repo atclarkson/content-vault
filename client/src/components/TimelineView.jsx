@@ -185,7 +185,6 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [isUploadingToDestination, setIsUploadingToDestination] = useState(false);
   const [expandedJournalEntryIds, setExpandedJournalEntryIds] = useState(new Set());
   const [isAnalyzeQueueOpen, setIsAnalyzeQueueOpen] = useState(false);
-  const [analyzeQueueOrder, setAnalyzeQueueOrder] = useState("newest");
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [activeFilterCount, setActiveFilterCount] = useState(0);
   const [activeBulkSheet, setActiveBulkSheet] = useState(null);
@@ -639,14 +638,8 @@ export default function TimelineView({ people, tags, tagGroups }) {
   ]);
 
   const analyzeQueuePhotos = useMemo(() => {
-    const pendingPhotos = visiblePhotosInOrder.filter((photo) => isPhotoPendingAnalyze(photo));
-
-    if (analyzeQueueOrder === sortDirection) {
-      return pendingPhotos;
-    }
-
-    return [...pendingPhotos].reverse();
-  }, [analyzeQueueOrder, sortDirection, visiblePhotosInOrder]);
+    return visiblePhotosInOrder.filter((photo) => isPhotoPendingAnalyze(photo));
+  }, [visiblePhotosInOrder]);
   const analyzeQueueStartPhotoId = useMemo(() => {
     const selectedPhotoId = editingPhoto?.id || null;
 
