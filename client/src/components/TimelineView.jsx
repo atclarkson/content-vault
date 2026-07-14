@@ -5,6 +5,7 @@ import {
   getJournalEntries,
   getPhotos,
   getVideos,
+  restorePhoto,
   updatePhoto,
   uploadPhotos
 } from "../api";
@@ -25,7 +26,8 @@ const CONTENT_TYPE_OPTIONS = [
   { id: "all", label: "All", disabled: false },
   { id: "photos", label: "Photos", disabled: false },
   { id: "videos", label: "Videos", disabled: false },
-  { id: "journal", label: "Journal", disabled: false }
+  { id: "journal", label: "Journal", disabled: false },
+  { id: "trash", label: "Recently Deleted", shortLabel: "Deleted", disabled: false }
 ];
 
 const TIMELINE_SECTION_STYLE = {
@@ -189,6 +191,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [activeBulkSheet, setActiveBulkSheet] = useState(null);
   const [bulkSheetOffsetY, setBulkSheetOffsetY] = useState(0);
   const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
+  const [restoringPhotoId, setRestoringPhotoId] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [destinationActionKey, setDestinationActionKey] = useState(0);
   const contentScrollRef = useRef(null);
@@ -243,7 +246,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
       try {
         const [destinationsResponse, photosResponse, videosResponse, journalEntriesResponse] = await Promise.all([
           getDestinations(),
-          getPhotos(filters),
+          getPhotos(buildPhotoRequestFilters(filters, contentType)),
           getVideos(),
           getJournalEntries()
         ]);
@@ -274,9 +277,17 @@ export default function TimelineView({ people, tags, tagGroups }) {
     return () => {
       isActive = false;
     };
-  }, [filters, refreshNonce]);
+  }, [contentType, filters, refreshNonce]);
 
-  const hasPendingPhotoProcessing = photos.some((photo) => (
+  const visibleTimelinePhotos = useMemo(() => {
+    if (contentType === "trash") {
+      return photos.filter((photo) => photo.deleted_at);
+    }
+
+    return photos.filter((photo) => !photo.deleted_at);
+  }, [contentType, photos]);
+
+  const hasPendingPhotoProcessing = visibleTimelinePhotos.some((photo) => (
     photo.processing_status === "queued" ||
     photo.processing_status === "processing" ||
     photo.geo_status === "queued"
@@ -291,7 +302,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
 
     const intervalId = window.setInterval(async () => {
       try {
-        const photosResponse = await getPhotos(filters);
+        const photosResponse = await getPhotos(buildPhotoRequestFilters(filters, contentType));
 
         if (!isActive) {
           return;
@@ -311,7 +322,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
       isActive = false;
       window.clearInterval(intervalId);
     };
-  }, [filters, hasPendingPhotoProcessing]);
+  }, [contentType, filters, hasPendingPhotoProcessing]);
 
   const groupedTimeline = useMemo(() => {
     const photosByDestinationId = new Map(destinations.map((destination) => [destination.id, []]));
@@ -322,7 +333,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
     const undatedJournalEntries = [];
     const brandedVideos = [];
 
-    for (const photo of photos) {
+    for (const photo of visibleTimelinePhotos) {
       if (!photo.captured_at) {
         undatedPhotos.push(photo);
         continue;
@@ -384,7 +395,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
       undatedJournalEntries: sortJournalEntriesForDisplay(undatedJournalEntries, sortDirection),
       brandedVideos: sortVideosForDisplay(brandedVideos, sortDirection)
     };
-  }, [destinations, journalEntries, photos, videos, sortDirection]);
+  }, [destinations, journalEntries, sortDirection, videos, visibleTimelinePhotos]);
 
   const activeMissingFilters = useMemo(() => parseCsvList(filters.missing), [filters.missing]);
   const showNoContentDestinations = activeMissingFilters.includes("no_content");
@@ -402,20 +413,20 @@ export default function TimelineView({ people, tags, tagGroups }) {
   }, [groupedTimeline.destinations, showNoContentDestinations]);
 
   const locationOptions = useMemo(() => ({
-    neighborhoods: buildUniqueLocationOptions(photos, "neighborhood"),
+    neighborhoods: buildUniqueLocationOptions(visibleTimelinePhotos, "neighborhood"),
     cities: buildUniqueLocationOptions([
-      ...photos.map((photo) => ({ city: photo.city })),
+      ...visibleTimelinePhotos.map((photo) => ({ city: photo.city })),
       ...videos.map((video) => ({ city: video.filmed_city }))
     ], "city"),
-    regions: buildUniqueLocationOptions(photos, "region"),
+    regions: buildUniqueLocationOptions(visibleTimelinePhotos, "region"),
     countries: buildUniqueLocationOptions([
-      ...photos.map((photo) => ({ country: photo.country })),
+      ...visibleTimelinePhotos.map((photo) => ({ country: photo.country })),
       ...videos.map((video) => ({ country: video.filmed_country }))
     ], "country")
-  }), [photos, videos]);
+  }), [videos, visibleTimelinePhotos]);
   const isBulkEditing = selectedIds.size > 1;
   const isDesktopBulkEditing = !isMobile && isBulkEditing;
-  const hasMobileOverlayEditor = Boolean(editingVideo) || Boolean(editingPhoto);
+  const hasMobileOverlayEditor = contentType !== "trash" && (Boolean(editingVideo) || Boolean(editingPhoto));
   const hasActiveFilters = Object.entries(filters).some(([, value]) => {
     if (value === undefined || value === null) {
       return false;
@@ -448,6 +459,17 @@ export default function TimelineView({ people, tags, tagGroups }) {
       selectionAnchorRef.current = null;
     }
   }, [selectedIds.size]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    selectionAnchorRef.current = null;
+    setActiveBulkSheet(null);
+
+    if (contentType === "trash") {
+      setEditingPhoto(null);
+      setEditingVideo(null);
+    }
+  }, [contentType]);
 
   function handleSavedPhoto(updatedPhoto) {
     setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
@@ -482,7 +504,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
 
   async function refreshPhotosPreservingView({ resetSelection = false } = {}) {
     const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
-    const photosResponse = await getPhotos(filters);
+    const photosResponse = await getPhotos(buildPhotoRequestFilters(filters, contentType));
     const nextPhotos = photosResponse?.data || [];
 
     syncLoadedPhotos(nextPhotos, { resetSelection });
@@ -499,6 +521,24 @@ export default function TimelineView({ people, tags, tagGroups }) {
       await refreshPhotosPreservingView();
     } catch (refreshError) {
       setError(refreshError.message || "Failed to refresh photos");
+    }
+  }
+
+  async function handleRestorePhoto(photoId) {
+    if (!photoId || restoringPhotoId) {
+      return;
+    }
+
+    setRestoringPhotoId(photoId);
+    setError("");
+
+    try {
+      await restorePhoto(photoId);
+      await refreshPhotosPreservingView({ resetSelection: true });
+    } catch (restoreError) {
+      setError(restoreError.message || "Failed to restore photo");
+    } finally {
+      setRestoringPhotoId(null);
     }
   }
 
@@ -567,7 +607,10 @@ export default function TimelineView({ people, tags, tagGroups }) {
     }
   }
 
-  const filteredPhotos = useMemo(() => sortPhotosForDisplay(photos, sortDirection), [photos, sortDirection]);
+  const filteredPhotos = useMemo(
+    () => sortPhotosForDisplay(visibleTimelinePhotos, sortDirection),
+    [sortDirection, visibleTimelinePhotos]
+  );
   const visiblePhotosInOrder = useMemo(() => {
     if (hasActiveFilters && !showNoContentDestinations) {
       return contentType === "videos" ? [] : filteredPhotos;
@@ -889,14 +932,14 @@ export default function TimelineView({ people, tags, tagGroups }) {
               <button
                 type="button"
                 onClick={() => setIsAnalyzeQueueOpen(true)}
-                disabled={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0}
-                className={contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0 ? "btn-secondary gap-3 opacity-50" : "ai-button"}
+                disabled={contentType === "videos" || contentType === "journal" || contentType === "trash" || analyzeQueuePhotos.length === 0}
+                className={contentType === "videos" || contentType === "journal" || contentType === "trash" || analyzeQueuePhotos.length === 0 ? "btn-secondary gap-3 opacity-50" : "ai-button"}
               >
                 <i className="ti ti-sparkles text-base" aria-hidden="true" />
                 <span>Analyze Queue</span>
                 <span
                   className={
-                    contentType === "videos" || contentType === "journal" || analyzeQueuePhotos.length === 0
+                    contentType === "videos" || contentType === "journal" || contentType === "trash" || analyzeQueuePhotos.length === 0
                       ? "rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700"
                       : "rounded-full bg-white/15 px-2 py-0.5 text-xs text-stone-50"
                   }
@@ -927,7 +970,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
                         : "text-stone-600 hover:bg-stone-50 hover:text-stone-900"
                   } ${option.id !== CONTENT_TYPE_OPTIONS[CONTENT_TYPE_OPTIONS.length - 1].id ? "border-r border-stone-300" : ""}`}
                 >
-                  {option.label}
+                  {option.shortLabel || option.label}
                 </button>
               ))}
             </div>
@@ -1049,6 +1092,34 @@ export default function TimelineView({ people, tags, tagGroups }) {
               <p className="text-sm font-medium text-stone-700">Loading timeline...</p>
               <p className="mt-2 text-sm text-stone-500">Fetching destinations, photos, and videos.</p>
               <p className="mt-1 text-sm text-stone-500">Loading journal entries too.</p>
+            </div>
+          </section>
+        ) : contentType === "trash" ? (
+          <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
+            <div className="mb-6 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Recently Deleted</p>
+                <h2 className="mt-2 text-2xl font-semibold text-stone-900">
+                  {filteredPhotos.length} deleted photo{filteredPhotos.length === 1 ? "" : "s"}
+                </h2>
+                <p className="mt-2 text-sm text-stone-500">
+                  Restoring a photo returns it to the main timeline.
+                </p>
+              </div>
+
+              {hasActiveFilters ? (
+                <button type="button" onClick={handleClearFilters} className="btn-secondary">
+                  Clear Filters
+                </button>
+              ) : null}
+            </div>
+
+            <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+              <RecentlyDeletedGrid
+                photos={filteredPhotos}
+                restoringPhotoId={restoringPhotoId}
+                onRestore={handleRestorePhoto}
+              />
             </div>
           </section>
         ) : hasActiveFilters && !showNoContentDestinations ? (
@@ -1399,8 +1470,9 @@ export default function TimelineView({ people, tags, tagGroups }) {
                       type="button"
                       onClick={handleDeleteSelection}
                       disabled={isDeleteSubmitting}
-                      className="btn-primary flex-1"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <i className="ti ti-trash text-base" aria-hidden="true" />
                       {isDeleteSubmitting ? "Deleting..." : "Delete"}
                     </button>
                   </div>
@@ -1411,6 +1483,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
         </>
       ) : null}
 
+      {contentType !== "trash" ? (
       <div
         className={
           hasMobileOverlayEditor
@@ -1455,6 +1528,7 @@ export default function TimelineView({ people, tags, tagGroups }) {
           />
         )}
       </div>
+      ) : null}
       </div>
 
       <AnalyzeQueueModal
@@ -1469,6 +1543,17 @@ export default function TimelineView({ people, tags, tagGroups }) {
       />
     </>
   );
+}
+
+function buildPhotoRequestFilters(filters, contentType) {
+  if (contentType === "trash") {
+    return {
+      ...filters,
+      include_deleted: true
+    };
+  }
+
+  return filters;
 }
 
 function isPhotoPendingAnalyze(photo) {
@@ -1497,6 +1582,94 @@ function isPhotoPendingAnalyze(photo) {
   }
 
   return !Array.isArray(photo.tags) || photo.tags.length === 0;
+}
+
+function formatDeletedTimestamp(value) {
+  if (!value) {
+    return "Deleted recently";
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Deleted recently";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(parsed);
+}
+
+function RecentlyDeletedGrid({ photos, restoringPhotoId, onRestore }) {
+  if (photos.length === 0) {
+    return (
+      <div className="rounded-[2rem] border border-dashed border-stone-300 bg-stone-50 px-8 py-16 text-center">
+        <p className="text-lg font-medium text-stone-700">No deleted photos right now.</p>
+        <p className="mt-3 text-sm text-stone-500">
+          Photos you delete from the timeline will show up here until you restore them.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      {photos.map((photo) => {
+        const isRestoring = restoringPhotoId === photo.id;
+
+        return (
+          <article
+            key={photo.id}
+            style={TIMELINE_CARD_STYLE}
+            className="overflow-hidden rounded-[1.75rem] border border-stone-300 bg-white"
+          >
+            <div className="relative aspect-[4/3] overflow-hidden bg-stone-200">
+              {photo.thumbnail_url ? (
+                <img
+                  src={photo.thumbnail_url}
+                  alt={photo.alt_text || photo.original_filename || "Deleted photo thumbnail"}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center bg-stone-200 text-sm text-stone-500">
+                  No thumbnail
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-stone-950/70 via-transparent to-transparent" />
+              <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-full bg-stone-950/70 px-3 py-1 text-xs font-medium text-white">
+                <i className="ti ti-trash text-sm" aria-hidden="true" />
+                Deleted
+              </div>
+              <div className="absolute inset-x-0 bottom-0 px-4 py-3 text-white">
+                <p className="truncate text-sm font-medium">{photo.original_filename || "Untitled photo"}</p>
+                <p className="mt-1 text-xs text-white/80">{formatDeletedTimestamp(photo.deleted_at)}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 px-4 py-4">
+              <div className="min-h-[2.5rem]">
+                <p className="line-clamp-2 text-sm text-stone-600">
+                  {[photo.city, photo.country].filter(Boolean).join(", ") || "No location saved"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRestore(photo.id)}
+                disabled={Boolean(restoringPhotoId)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <i className="ti ti-restore text-base" aria-hidden="true" />
+                <span>{isRestoring ? "Restoring..." : "Restore"}</span>
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 function DestinationDropZone({ destination, isActive, isUploading, onDragEnter, onDragLeave, onDropFiles }) {

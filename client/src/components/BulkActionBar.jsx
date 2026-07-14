@@ -15,6 +15,44 @@ function ActionMenu({ title, children }) {
   );
 }
 
+const ACTION_BUTTONS = {
+  "assign-destination": { label: "Assign Destination", icon: "ti ti-map-pin", className: "btn-secondary" },
+  "add-tag": { label: "Add Tag", icon: "ti ti-tag-plus", className: "btn-secondary" },
+  "remove-tag": { label: "Remove Tag", icon: "ti ti-tag-minus", className: "btn-secondary" },
+  "add-person": { label: "Add Person", icon: "ti ti-user-plus", className: "btn-secondary" },
+  "remove-person": { label: "Remove Person", icon: "ti ti-user-minus", className: "btn-secondary" },
+  "set-location": { label: "Set Location", icon: "ti ti-map-2", className: "btn-secondary" },
+  "delete-photos": {
+    label: "Delete Selected",
+    icon: "ti ti-trash",
+    className: "inline-flex items-center gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
+  },
+  clear: { label: "Clear Selection", icon: "ti ti-x", className: "btn-secondary" }
+};
+
+function BulkToolbarButton({ actionKey, isActive, onClick }) {
+  const action = ACTION_BUTTONS[actionKey];
+
+  if (!action) {
+    return null;
+  }
+
+  const isDelete = actionKey === "delete-photos";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 ${
+        isDelete ? action.className : "btn-secondary"
+      } ${isActive && !isDelete ? "bg-stone-900 text-stone-50 hover:bg-stone-900 hover:text-stone-50" : ""}`}
+    >
+      <i className={`${action.icon} text-base`} aria-hidden="true" />
+      <span>{action.label}</span>
+    </button>
+  );
+}
+
 function normalizeIds(selectedIds) {
   return Array.from(selectedIds || []);
 }
@@ -737,8 +775,9 @@ export function DeletePhotosAction({ selectedIds, onDone, onClearSelection, onCl
           type="button"
           onClick={handleSubmit}
           disabled={isSubmitting || ids.length === 0}
-          className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
+          <i className="ti ti-trash text-base" aria-hidden="true" />
           {isSubmitting ? "Deleting..." : "Delete Selected"}
         </button>
         {onClose ? (
@@ -1008,30 +1047,15 @@ export default function BulkActionBar({ selectedIds, people, allTags, locationOp
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={() => setActiveAction("assign-destination")} className="btn-secondary">
-            Assign Destination
-          </button>
-          <button type="button" onClick={() => setActiveAction("add-tag")} className="btn-secondary">
-            Add Tag
-          </button>
-          <button type="button" onClick={() => setActiveAction("remove-tag")} className="btn-secondary">
-            Remove Tag
-          </button>
-          <button type="button" onClick={() => setActiveAction("add-person")} className="btn-secondary">
-            Add Person
-          </button>
-          <button type="button" onClick={() => setActiveAction("remove-person")} className="btn-secondary">
-            Remove Person
-          </button>
-          <button type="button" onClick={() => setActiveAction("set-location")} className="btn-secondary">
-            Set Location
-          </button>
-          <button type="button" onClick={() => setActiveAction("delete-photos")} className="btn-secondary">
-            Delete Selected
-          </button>
-          <button type="button" onClick={onClear} className="btn-secondary">
-            Clear Selection
-          </button>
+          {["assign-destination", "add-tag", "remove-tag", "add-person", "remove-person", "set-location", "delete-photos"].map((actionKey) => (
+            <BulkToolbarButton
+              key={actionKey}
+              actionKey={actionKey}
+              isActive={activeAction === actionKey}
+              onClick={() => setActiveAction(actionKey)}
+            />
+          ))}
+          <BulkToolbarButton actionKey="clear" isActive={false} onClick={onClear} />
         </div>
 
         {activeAction === "assign-destination" ? (
