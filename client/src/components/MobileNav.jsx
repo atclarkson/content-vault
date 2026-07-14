@@ -73,9 +73,7 @@ export default function MobileNav({ currentView, onNavigate }) {
                   getItemClasses(isActive)
                 }`}
               >
-                <span className="text-base leading-none" aria-hidden="true">
-                  {item.icon}
-                </span>
+                <i className={`${item.icon} text-base leading-none`} aria-hidden="true" />
                 <span className="mt-1">{item.label}</span>
               </button>
             );

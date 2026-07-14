@@ -45,8 +45,8 @@ function BuildStamp({ className = "" }) {
 
 function DesktopTopNav({ currentView, onNavigate }) {
   return (
-    <nav className="mb-4 hidden lg:block">
-      <div className="overflow-x-auto rounded-[1.75rem] border border-stone-300 bg-stone-50/90 px-3 py-3">
+    <nav className="hidden min-w-0 flex-1 lg:block">
+      <div className="overflow-x-auto">
         <div className="flex min-w-max items-center gap-2">
           {NAV_ITEMS.map((item) => {
             const isActive = item.id === currentView;
@@ -59,12 +59,10 @@ function DesktopTopNav({ currentView, onNavigate }) {
                 className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
                   isActive
                     ? "bg-stone-900 text-stone-50 shadow-sm"
-                    : "text-stone-700 hover:bg-white hover:text-stone-900"
+                    : "text-stone-700 hover:bg-stone-100 hover:text-stone-900"
                 }`}
               >
-                <span className="text-base leading-none" aria-hidden="true">
-                  {item.icon}
-                </span>
+                <i className={`${item.icon} text-base`} aria-hidden="true" />
                 <span>{item.label}</span>
               </button>
             );
@@ -258,18 +256,29 @@ function MainApp() {
 
       <main className="h-screen overflow-hidden lg:pl-[240px]">
         <div className="mx-auto flex h-screen w-full max-w-[1800px] flex-col overflow-hidden px-6 py-6 pb-16 lg:pb-0 2xl:px-8">
-          <div className="mb-4 flex items-center justify-end">
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={isLoggingOut}
-              className="btn-secondary rounded-2xl"
-            >
-              {isLoggingOut ? "Signing out..." : "Logout"}
-            </button>
+          <div className="mb-4 flex items-center gap-4">
+            <DesktopTopNav currentView={currentView} onNavigate={setCurrentView} />
+            <div className="hidden shrink-0 lg:block">
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="btn-secondary rounded-2xl"
+              >
+                {isLoggingOut ? "Signing out..." : "Logout"}
+              </button>
+            </div>
+            <div className="ml-auto lg:hidden">
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="btn-secondary rounded-2xl"
+              >
+                {isLoggingOut ? "Signing out..." : "Logout"}
+              </button>
+            </div>
           </div>
-
-          <DesktopTopNav currentView={currentView} onNavigate={setCurrentView} />
 
           {error ? (
             <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">

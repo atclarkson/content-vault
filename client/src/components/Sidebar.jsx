@@ -31,16 +31,13 @@ export default function Sidebar({
 
       {currentView === "photos" ? (
         <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="rounded-[1.5rem] border border-stone-300 bg-stone-50/80 px-4 py-4">
+          <div className="px-1">
             <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Trips</p>
-            <p className="mt-2 text-sm text-stone-600">
-              Scroll the timeline or jump straight to a destination.
-            </p>
           </div>
 
-          <div ref={listRef} className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+          <div ref={listRef} className="mt-4 min-h-0 flex-1 overflow-y-auto">
             {items.length > 0 ? (
-              <div className="space-y-2 pb-4">
+              <div className="pb-4">
                 {items.map((item) => {
                   const isActive = item.id === activeItemId;
 
@@ -50,16 +47,16 @@ export default function Sidebar({
                       type="button"
                       data-trip-id={item.id}
                       onClick={() => onSelectItem?.(item.id)}
-                      className={`w-full rounded-[1.35rem] border px-4 py-3 text-left transition ${
+                      className={`w-full border-l-2 px-3 py-3 text-left transition ${
                         isActive
-                          ? "border-stone-900 bg-stone-900 text-stone-50 shadow-sm"
-                          : "border-stone-200 bg-white/80 text-stone-700 hover:border-stone-300 hover:bg-white"
+                          ? "border-stone-900 bg-stone-100/90 text-stone-950"
+                          : "border-transparent text-stone-600 hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900"
                       }`}
                     >
-                      <span className="block text-sm font-semibold">
+                      <span className="block text-sm font-semibold leading-tight">
                         {item.label}
                       </span>
-                      <span className={`mt-1 block text-xs ${isActive ? "text-stone-300" : "text-stone-500"}`}>
+                      <span className={`mt-1 block text-xs ${isActive ? "text-stone-700" : "text-stone-500"}`}>
                         {item.meta}
                       </span>
                     </button>
@@ -67,14 +64,14 @@ export default function Sidebar({
                 })}
               </div>
             ) : (
-              <div className="rounded-[1.5rem] border border-dashed border-stone-300 bg-stone-50 px-4 py-5 text-sm text-stone-500">
+              <div className="px-1 py-3 text-sm text-stone-500">
                 {emptyMessage}
               </div>
             )}
           </div>
         </div>
       ) : (
-        <div className="mt-6 rounded-[1.5rem] border border-stone-300 bg-stone-50/80 px-4 py-4 text-sm text-stone-600">
+        <div className="mt-6 px-1 text-sm text-stone-600">
           Navigate between sections using the tabs above.
         </div>
       )}
