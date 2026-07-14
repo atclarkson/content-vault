@@ -1154,7 +1154,7 @@ export default function AnalyzeQueueModal({
               </div>
 
               <div className="border-t border-stone-200 px-4 py-3 lg:px-6">
-                <div className="mx-auto w-full max-w-3xl overflow-hidden border border-stone-300 bg-stone-100">
+                <div className="mx-auto w-full max-w-3xl overflow-hidden border border-stone-300 bg-stone-300">
                   <button
                     type="button"
                     onClick={() => {
@@ -1165,27 +1165,29 @@ export default function AnalyzeQueueModal({
                     className="block w-full"
                     aria-label="Open preview larger"
                   >
-                    <div className="relative flex max-h-[28vh] min-h-[160px] items-center justify-center p-2 sm:min-h-[180px] lg:max-h-[40vh] lg:min-h-[220px]">
+                    <div className="relative h-[28vh] min-h-[160px] max-h-[28vh] bg-stone-300 sm:min-h-[180px] sm:h-[32vh] sm:max-h-[32vh] lg:h-[40vh] lg:min-h-[220px] lg:max-h-[40vh]">
                       {displayedPreviewUrl ? (
                         <>
-                          <img
-                            ref={previewImageRef}
-                            src={displayedPreviewUrl}
-                            alt={currentPhoto.alt_text || currentPhoto.original_filename}
-                            className="h-full w-full object-contain"
-                            onLoad={(event) => {
-                              setPreviewImageMetrics(
-                                getImageOverlayMetrics(event.currentTarget),
-                              );
-                            }}
-                          />
+                          <div className="absolute inset-0 flex items-center justify-center p-2">
+                            <img
+                              ref={previewImageRef}
+                              src={displayedPreviewUrl}
+                              alt={currentPhoto.alt_text || currentPhoto.original_filename}
+                              className="block max-h-full max-w-full object-contain"
+                              onLoad={(event) => {
+                                setPreviewImageMetrics(
+                                  getImageOverlayMetrics(event.currentTarget),
+                                );
+                              }}
+                            />
+                          </div>
                           <FacePrematchOverlay
                             faces={currentFaceRows}
                             metrics={previewImageMetrics}
                           />
                         </>
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm text-stone-500">
+                        <div className="flex h-full w-full items-center justify-center text-sm text-stone-600">
                           No image available
                         </div>
                       )}
