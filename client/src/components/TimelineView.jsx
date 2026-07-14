@@ -50,6 +50,23 @@ function formatMonthRange(dateStart, dateEnd) {
   return `${formatter.format(new Date(dateStart))} – ${formatter.format(new Date(dateEnd))}`;
 }
 
+function formatArrivalMonth(value) {
+  if (!value) {
+    return "Unknown month";
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown month";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric"
+  }).format(parsed);
+}
+
 function formatJournalDate(value) {
   if (!value) {
     return "Unknown date";
@@ -166,7 +183,7 @@ function useIsMobile() {
   return isMobile;
 }
 
-export default function TimelineView({ people, tags, tagGroups }) {
+export default function TimelineView({ people, tags, tagGroups, onDesktopSidebarChange }) {
   const isMobile = useIsMobile();
   const [destinations, setDestinations] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -191,9 +208,12 @@ export default function TimelineView({ people, tags, tagGroups }) {
   const [bulkSheetOffsetY, setBulkSheetOffsetY] = useState(0);
   const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
   const [restoringPhotoId, setRestoringPhotoId] = useState(null);
+  const [activeDestinationId, setActiveDestinationId] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [destinationActionKey, setDestinationActionKey] = useState(0);
   const contentScrollRef = useRef(null);
+  const destinationSectionRefs = useRef(new Map());
+  const sidebarSyncFrameRef = useRef(null);
   const selectionAnchorRef = useRef(null);
   const filterSheetStartYRef = useRef(0);
   const filterSheetCanDragRef = useRef(false);
@@ -411,6 +431,12 @@ export default function TimelineView({ people, tags, tagGroups }) {
     ));
   }, [groupedTimeline.destinations, showNoContentDestinations]);
 
+  const desktopSidebarItems = useMemo(() => displayedDestinations.map((destination) => ({
+    id: destination.id,
+    label: `${destination.city}, ${destination.country}`,
+    meta: formatArrivalMonth(destination.date_start)
+  })), [displayedDestinations]);
+
   const locationOptions = useMemo(() => ({
     neighborhoods: buildUniqueLocationOptions(visibleTimelinePhotos, "neighborhood"),
     cities: buildUniqueLocationOptions([
@@ -450,6 +476,39 @@ export default function TimelineView({ people, tags, tagGroups }) {
     setFilters({});
   }
 
+  function setDestinationSectionRef(destinationId, element) {
+    if (!destinationId) {
+      return;
+    }
+
+    if (element) {
+      destinationSectionRefs.current.set(destinationId, element);
+      return;
+    }
+
+    destinationSectionRefs.current.delete(destinationId);
+  }
+
+  function scrollToDestination(destinationId) {
+    const container = contentScrollRef.current;
+    const section = destinationSectionRefs.current.get(destinationId);
+
+    if (!container || !section) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const sectionRect = section.getBoundingClientRect();
+    const nextTop = sectionRect.top - containerRect.top + container.scrollTop - 12;
+
+    container.scrollTo({
+      top: Math.max(0, nextTop),
+      behavior: "smooth"
+    });
+
+    setActiveDestinationId(destinationId);
+  }
+
   useEffect(() => {
     if (selectedIds.size === 0) {
       setActiveBulkSheet(null);
@@ -469,6 +528,161 @@ export default function TimelineView({ people, tags, tagGroups }) {
       setEditingVideo(null);
     }
   }, [contentType]);
+
+  useEffect(() => () => {
+    if (sidebarSyncFrameRef.current) {
+      window.cancelAnimationFrame(sidebarSyncFrameRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isMobile || contentType === "trash" || (hasActiveFilters && !showNoContentDestinations)) {
+      setActiveDestinationId(null);
+      return;
+    }
+
+    const firstDestinationId = displayedDestinations[0]?.id || null;
+    setActiveDestinationId((currentValue) => (
+      displayedDestinations.some((destination) => destination.id === currentValue)
+        ? currentValue
+        : firstDestinationId
+    ));
+  }, [contentType, displayedDestinations, hasActiveFilters, isMobile, showNoContentDestinations]);
+
+  useEffect(() => {
+    if (isMobile) {
+      onDesktopSidebarChange?.({
+        items: [],
+        activeId: null,
+        onSelect: null,
+        emptyMessage: "Trips are available on desktop."
+      });
+      return undefined;
+    }
+
+    if (contentType === "trash") {
+      onDesktopSidebarChange?.({
+        items: [],
+        activeId: null,
+        onSelect: null,
+        emptyMessage: "Recently deleted photos do not belong to a trip list."
+      });
+      return undefined;
+    }
+
+    if (hasActiveFilters && !showNoContentDestinations) {
+      onDesktopSidebarChange?.({
+        items: [],
+        activeId: null,
+        onSelect: null,
+        emptyMessage: "Clear photo filters to navigate trips from the sidebar."
+      });
+      return undefined;
+    }
+
+    onDesktopSidebarChange?.({
+      items: desktopSidebarItems,
+      activeId: activeDestinationId,
+      onSelect: scrollToDestination,
+      emptyMessage: showNoContentDestinations
+        ? "No matching destinations are visible right now."
+        : "Trips will appear here."
+    });
+
+    return () => {
+      onDesktopSidebarChange?.({
+        items: [],
+        activeId: null,
+        onSelect: null,
+        emptyMessage: "Trips will appear here."
+      });
+    };
+  }, [
+    activeDestinationId,
+    contentType,
+    desktopSidebarItems,
+    hasActiveFilters,
+    isMobile,
+    onDesktopSidebarChange,
+    showNoContentDestinations
+  ]);
+
+  useEffect(() => {
+    if (isMobile || contentType === "trash" || (hasActiveFilters && !showNoContentDestinations)) {
+      return undefined;
+    }
+
+    const container = contentScrollRef.current;
+
+    if (!container) {
+      return undefined;
+    }
+
+    function updateActiveDestination() {
+      const containerRect = container.getBoundingClientRect();
+      const candidates = displayedDestinations
+        .map((destination) => {
+          const element = destinationSectionRefs.current.get(destination.id);
+
+          if (!element) {
+            return null;
+          }
+
+          const rect = element.getBoundingClientRect();
+          return {
+            id: destination.id,
+            top: rect.top - containerRect.top,
+            distance: Math.abs(rect.top - containerRect.top - 96)
+          };
+        })
+        .filter(Boolean);
+
+      if (candidates.length === 0) {
+        return;
+      }
+
+      const passedDestinations = candidates.filter((candidate) => candidate.top <= 96);
+      const nextActive = passedDestinations.length > 0
+        ? passedDestinations.reduce((best, candidate) => (
+            candidate.top > best.top ? candidate : best
+          ))
+        : candidates.reduce((best, candidate) => (
+            candidate.distance < best.distance ? candidate : best
+          ));
+
+      setActiveDestinationId(nextActive.id);
+    }
+
+    function handleScroll() {
+      if (sidebarSyncFrameRef.current) {
+        window.cancelAnimationFrame(sidebarSyncFrameRef.current);
+      }
+
+      sidebarSyncFrameRef.current = window.requestAnimationFrame(() => {
+        updateActiveDestination();
+        sidebarSyncFrameRef.current = null;
+      });
+    }
+
+    updateActiveDestination();
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleScroll);
+      if (sidebarSyncFrameRef.current) {
+        window.cancelAnimationFrame(sidebarSyncFrameRef.current);
+        sidebarSyncFrameRef.current = null;
+      }
+    };
+  }, [
+    contentType,
+    displayedDestinations,
+    hasActiveFilters,
+    isMobile,
+    showNoContentDestinations
+  ]);
 
   function handleSavedPhoto(updatedPhoto) {
     setPhotos((currentPhotos) => currentPhotos.map((currentPhoto) => (
@@ -1167,7 +1381,12 @@ export default function TimelineView({ people, tags, tagGroups }) {
                   visiblePhotos.length > 0 || visibleVideos.length > 0 || visibleJournalEntries.length > 0;
 
                 return (
-                  <section key={destination.id} style={TIMELINE_SECTION_STYLE} className="border border-stone-300 bg-white">
+                  <section
+                    key={destination.id}
+                    ref={(element) => setDestinationSectionRef(destination.id, element)}
+                    style={TIMELINE_SECTION_STYLE}
+                    className="border border-stone-300 bg-white"
+                  >
                     <div className="border-b border-stone-200 px-5 py-4">
                       <div className="flex flex-wrap items-end justify-between gap-4">
                         <div>

@@ -10,6 +10,7 @@ import SettingsView from "./components/SettingsView";
 import TagsView from "./components/TagsView";
 import TimelineView from "./components/TimelineView";
 import UploadView from "./components/UploadView";
+import { NAV_ITEMS } from "./navItems";
 
 const VIEW_LABELS = {
   photos: "Timeline",
@@ -39,6 +40,38 @@ function BuildStamp({ className = "" }) {
     <p className={`text-xs text-stone-500 ${className}`.trim()}>
       Build: {formatBuildTime(__APP_BUILD_TIME__)}
     </p>
+  );
+}
+
+function DesktopTopNav({ currentView, onNavigate }) {
+  return (
+    <nav className="mb-4 hidden lg:block">
+      <div className="overflow-x-auto rounded-[1.75rem] border border-stone-300 bg-stone-50/90 px-3 py-3">
+        <div className="flex min-w-max items-center gap-2">
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.id === currentView;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate(item.id)}
+                className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
+                  isActive
+                    ? "bg-stone-900 text-stone-50 shadow-sm"
+                    : "text-stone-700 hover:bg-white hover:text-stone-900"
+                }`}
+              >
+                <span className="text-base leading-none" aria-hidden="true">
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </nav>
   );
 }
 
@@ -125,6 +158,12 @@ function MainApp() {
   const [people, setPeople] = useState([]);
   const [tags, setTags] = useState([]);
   const [tagGroups, setTagGroups] = useState([]);
+  const [timelineSidebarState, setTimelineSidebarState] = useState({
+    items: [],
+    activeId: null,
+    onSelect: null,
+    emptyMessage: "Trips will appear here."
+  });
   const [error, setError] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -179,6 +218,19 @@ function MainApp() {
     };
   }, []);
 
+  useEffect(() => {
+    if (currentView === "photos") {
+      return;
+    }
+
+    setTimelineSidebarState({
+      items: [],
+      activeId: null,
+      onSelect: null,
+      emptyMessage: "Open Timeline to browse trips here."
+    });
+  }, [currentView]);
+
   async function handleLogout() {
     if (isLoggingOut) {
       return;
@@ -195,7 +247,13 @@ function MainApp() {
 
   return (
     <div className="h-screen overflow-hidden text-stone-900">
-      <Sidebar currentView={currentView} onNavigate={setCurrentView} />
+      <Sidebar
+        currentView={currentView}
+        items={timelineSidebarState.items}
+        activeItemId={timelineSidebarState.activeId}
+        onSelectItem={timelineSidebarState.onSelect}
+        emptyMessage={timelineSidebarState.emptyMessage}
+      />
       <MobileNav currentView={currentView} onNavigate={setCurrentView} />
 
       <main className="h-screen overflow-hidden lg:pl-[240px]">
@@ -210,6 +268,8 @@ function MainApp() {
               {isLoggingOut ? "Signing out..." : "Logout"}
             </button>
           </div>
+
+          <DesktopTopNav currentView={currentView} onNavigate={setCurrentView} />
 
           {error ? (
             <div className="panel mb-4 border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -226,7 +286,12 @@ function MainApp() {
           ) : null}
 
           {currentView === "photos" ? (
-            <TimelineView people={people} tags={tags} tagGroups={tagGroups} />
+            <TimelineView
+              people={people}
+              tags={tags}
+              tagGroups={tagGroups}
+              onDesktopSidebarChange={setTimelineSidebarState}
+            />
           ) : currentView === "people" ? (
             <PeopleView people={people} refreshPeople={refreshPeople} />
           ) : currentView === "tags" ? (
